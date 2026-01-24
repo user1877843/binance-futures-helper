@@ -443,7 +443,6 @@ export function analyzeDivergence(klines: Kline[], rsiValues: number[]): Diverge
     };
   }
 
-  const closes = klines.map(k => parseFloat(k[4]));
   const highs = klines.map(k => parseFloat(k[2]));
   
   // 최근 50개 봉에서 고점 찾기 (피크 감지)

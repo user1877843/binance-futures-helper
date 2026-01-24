@@ -924,7 +924,7 @@ export function CustomChart({
         isLoadingMoreRef.current = true;
 
         // 캐시 키 생성
-        const cacheKey = `${visibleFrom}-${visibleTo}`;
+        const cacheKey = `${_visibleFrom}-${_visibleTo}`;
         const now = Date.now();
 
         // 캐시 확인
@@ -954,8 +954,8 @@ export function CustomChart({
 
         // 시작 시간과 종료 시간 계산 (여유분 포함)
         // Binance API는 startTime과 endTime을 밀리초로 받음
-        const startTimeMs = (visibleFrom * 1000) - (BUFFER_CANDLES * getIntervalMs(timeframe));
-        const endTimeMs = (visibleTo * 1000) + (BUFFER_CANDLES * getIntervalMs(timeframe));
+        const startTimeMs = (_visibleFrom * 1000) - (BUFFER_CANDLES * getIntervalMs(timeframe));
+        const endTimeMs = (_visibleTo * 1000) + (BUFFER_CANDLES * getIntervalMs(timeframe));
 
         // 데이터 로드 (AbortSignal 전달)
         const klines = await getCandlestickData(
@@ -1044,7 +1044,7 @@ export function CustomChart({
         dataCacheRef.current.set(cacheKey, {
           data: trimmedData,
           timestamp: now,
-          timeRange: { from: visibleFrom, to: visibleTo }
+          timeRange: { from: _visibleFrom, to: _visibleTo }
         });
 
         // 오래된 캐시 정리 (5개 이상이면 가장 오래된 것 제거)
