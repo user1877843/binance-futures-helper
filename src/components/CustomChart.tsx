@@ -67,16 +67,7 @@ function getVisibleDataCountByWidth(
 
 // 하이브리드 방식 설정
 const DEBOUNCE_DELAY_MS = 1000; // 드래그/줌 종료 후 1초 뒤 로드
-const BUFFER_CANDLES = 100; // 화면 범위 앞뒤 여유분
 const MAX_CANDLE_COUNT = Number.MAX_SAFE_INTEGER; // 최대 제한 해제
-const CACHE_EXPIRY_MS = 5 * 60 * 1000; // 캐시 유지 시간: 5분
-
-// 캐시 엔트리 타입
-interface CacheEntry {
-  data: CandlestickData[];
-  timestamp: number;
-  timeRange: { from: Time; to: Time };
-}
 
 // 타임프레임에 따른 최대 데이터 limit (스크롤 시 추가 로드용)
 function getMaxLimitForTimeframe(timeframe: Timeframe): number {
@@ -131,7 +122,6 @@ export function CustomChart({
   const updateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const barSpacingRef = useRef<number>(DEFAULT_BAR_SPACING_PX);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dataCacheRef = useRef<Map<string, CacheEntry>>(new Map()); // 캐시: key = "fromTime-toTime"
   const isInitialLoadRef = useRef<boolean>(true); // 초기 로드 플래그
   const abortControllerRef = useRef<AbortController | null>(null); // 요청 취소용
   const currentPriceLineRef = useRef<any>(null); // 현재가 라인 참조
@@ -904,179 +894,6 @@ export function CustomChart({
           return;
         }
         console.error('과거 데이터 추가 로드 에러:', err);
-        isLoadingMoreRef.current = false;
-      }
-    };
-
-    // 화면 범위 기반 데이터 로드 함수 (하이브리드 방식) - 현재 사용되지 않음
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _loadDataForVisibleRange = async (_visibleFrom: Time, _visibleTo: Time) => {
-      // 이전 요청이 있으면 취소 (최신 조작만 처리)
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-
-      // 새로운 AbortController 생성
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
-      
-      try {
-        isLoadingMoreRef.current = true;
-
-        // 캐시 키 생성
-        const cacheKey = `${_visibleFrom}-${_visibleTo}`;
-        const now = Date.now();
-
-        // 캐시 확인
-        const cached = dataCacheRef.current.get(cacheKey);
-        if (cached && (now - cached.timestamp) < CACHE_EXPIRY_MS) {
-          // 캐시 히트: 캐시된 데이터 사용
-          // 취소되었는지 확인
-          if (abortController.signal.aborted) {
-            isLoadingMoreRef.current = false;
-            return;
-          }
-          
-          allCandlestickDataRef.current = cached.data;
-          candlestickSeriesRef.current.setData(cached.data);
-          updateLineSeries(cached.data);
-          isLoadingMoreRef.current = false;
-          return;
-        }
-
-        // 화면 범위 + 여유분 계산
-        const containerWidth = chartContainerRef.current?.clientWidth || chartContainerRef.current?.offsetWidth || 800;
-        const visibleCount = getVisibleDataCountByWidth(containerWidth, barSpacingRef.current);
-        const totalNeeded = visibleCount + (BUFFER_CANDLES * 2); // 앞뒤 여유분
-
-        // 타임프레임별 최대 limit 적용
-        const effectiveLimit = Math.min(totalNeeded, getMaxLimitForTimeframe(timeframe));
-
-        // 시작 시간과 종료 시간 계산 (여유분 포함)
-        // Binance API는 startTime과 endTime을 밀리초로 받음
-        const startTimeMs = (_visibleFrom * 1000) - (BUFFER_CANDLES * getIntervalMs(timeframe));
-        const endTimeMs = (_visibleTo * 1000) + (BUFFER_CANDLES * getIntervalMs(timeframe));
-
-        // 데이터 로드 (AbortSignal 전달)
-        const klines = await getCandlestickData(
-          symbol,
-          timeframe,
-          effectiveLimit,
-          Math.max(startTimeMs, 0), // 음수 방지
-          endTimeMs,
-          abortController.signal // AbortSignal 전달
-        );
-
-        // 취소되었는지 확인
-        if (abortController.signal.aborted) {
-          isLoadingMoreRef.current = false;
-          return;
-        }
-
-        if (!klines || klines.length === 0) {
-          isLoadingMoreRef.current = false;
-          return;
-        }
-
-        // 취소되었는지 다시 확인 (데이터 처리 전)
-        if (abortController.signal.aborted) {
-          isLoadingMoreRef.current = false;
-          return;
-        }
-
-        // 데이터 변환
-        const candlestickData: CandlestickData[] = klines.map((kline: Kline) => ({
-          time: (Math.floor(kline[0] / 1000) as Time),
-          open: parseFloat(kline[1]),
-          high: parseFloat(kline[2]),
-          low: parseFloat(kline[3]),
-          close: parseFloat(kline[4]),
-        }));
-
-        // 거래량 데이터 변환
-        const volumeData: VolumeData[] = klines.map((kline: Kline) => {
-          const time = Math.floor(kline[0] / 1000) as Time;
-          const open = parseFloat(kline[1]);
-          const close = parseFloat(kline[4]);
-          const volume = parseFloat(kline[5]);
-          const color = close >= open ? '#26a69a' : '#ef5350';
-          return {
-            time,
-            value: volume,
-            color,
-          };
-        });
-
-        // 취소되었는지 다시 확인 (데이터 처리 중)
-        if (abortController.signal.aborted) {
-          isLoadingMoreRef.current = false;
-          return;
-        }
-
-        // 시간순 정렬 및 중복 제거
-        const sortedData = candlestickData.sort((a, b) => a.time - b.time);
-        const uniqueData = sortedData.filter((item, index, self) =>
-          index === self.findIndex((t) => t.time === item.time)
-        );
-
-        // 거래량 데이터도 정렬 및 중복 제거
-        const sortedVolumeData = volumeData.sort((a, b) => a.time - b.time);
-        const uniqueVolumeData = sortedVolumeData.filter((item, index, self) =>
-          index === self.findIndex((t) => t.time === item.time)
-        );
-
-        // 상한 체크
-        const trimmedData = uniqueData.length > MAX_CANDLE_COUNT
-          ? uniqueData.slice(-MAX_CANDLE_COUNT)
-          : uniqueData;
-
-        const trimmedVolumeData = uniqueVolumeData.length > MAX_CANDLE_COUNT
-          ? uniqueVolumeData.slice(-MAX_CANDLE_COUNT)
-          : uniqueVolumeData;
-
-        // 취소되었는지 최종 확인 (차트 업데이트 전)
-        if (abortController.signal.aborted) {
-          isLoadingMoreRef.current = false;
-          return;
-        }
-
-        // 캐시 저장
-        dataCacheRef.current.set(cacheKey, {
-          data: trimmedData,
-          timestamp: now,
-          timeRange: { from: _visibleFrom, to: _visibleTo }
-        });
-
-        // 오래된 캐시 정리 (5개 이상이면 가장 오래된 것 제거)
-        if (dataCacheRef.current.size > 5) {
-          const oldestKey = Array.from(dataCacheRef.current.entries())
-            .sort((a, b) => a[1].timestamp - b[1].timestamp)[0][0];
-          dataCacheRef.current.delete(oldestKey);
-        }
-
-        allCandlestickDataRef.current = trimmedData;
-        allVolumeDataRef.current = trimmedVolumeData;
-        candlestickSeriesRef.current.setData(trimmedData);
-        if (volumeSeriesRef.current) {
-          volumeSeriesRef.current.setData(trimmedVolumeData);
-        }
-        updateLineSeries(trimmedData);
-        
-        // 거래량 스케일 업데이트
-        setTimeout(() => {
-          if (updateVolumeScaleRef.current) {
-            updateVolumeScaleRef.current();
-          }
-        }, 100);
-        
-        isLoadingMoreRef.current = false;
-      } catch (err) {
-        // AbortError는 정상적인 취소이므로 로그 출력 안 함
-        if (err instanceof Error && err.name === 'AbortError') {
-          isLoadingMoreRef.current = false;
-          return;
-        }
-        console.error('화면 범위 데이터 로드 에러:', err);
         isLoadingMoreRef.current = false;
       }
     };
