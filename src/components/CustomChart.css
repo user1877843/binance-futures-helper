@@ -1,0 +1,215 @@
+.custom-chart-container {
+  position: relative;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: visible; /* 시간축이 보이도록 변경 */
+  background: white;
+  margin-top: 1rem;
+}
+
+.chart-controls {
+  padding: 0.75rem 1rem;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.timeframe-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.timeframe-selector label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.timeframe-select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.timeframe-select:hover {
+  border-color: #007bff;
+}
+
+.timeframe-select:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.data-limit-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.data-limit-selector label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.data-limit-select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.data-limit-select:hover {
+  border-color: #007bff;
+}
+
+.data-limit-select:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.chart-hint {
+  font-size: 0.85rem;
+  color: #666;
+  margin-left: auto;
+  padding: 0.25rem 0.5rem;
+  background: #e7f3ff;
+  border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .chart-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .timeframe-selector,
+  .data-limit-selector {
+    width: 100%;
+  }
+
+  .timeframe-select,
+  .data-limit-select {
+    width: 100%;
+  }
+
+  .chart-hint {
+    margin-left: 0;
+    text-align: center;
+  }
+}
+
+.custom-chart-wrapper {
+  width: 100%;
+  min-width: 300px;
+  min-height: 300px;
+  overflow: visible; /* 시간축이 보이도록 */
+  margin-bottom: 25px; /* 시간축 공간 확보 */
+}
+
+.chart-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  z-index: 10;
+  color: #666;
+}
+
+.spinner-small {
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #007bff;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 0.5rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.chart-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  z-index: 10;
+  color: #dc3545;
+  padding: 1rem;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: #f8f9fa;
+  border-top: 1px solid #e0e0e0;
+  font-size: 0.85rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.adx-info {
+  margin-left: auto;
+  font-weight: 500;
+}
+
+.adx-label {
+  color: #666;
+  font-weight: 600;
+}
+
+.adx-value {
+  font-weight: 700;
+  color: #333;
+}
+
+.adx-value.strong {
+  color: #28a745;
+}
+
+.adx-value.moderate {
+  color: #ffc107;
+}
+
+.adx-value.weak {
+  color: #6c757d;
+}
+
+.adx-trend {
+  color: #666;
+  font-size: 0.8rem;
+  margin-left: 0.25rem;
+}

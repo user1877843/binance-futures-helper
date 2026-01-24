@@ -1,0 +1,1085 @@
+import { useState, useEffect } from 'react';
+import { getTradingSymbols, getTicker24hr, getFundingRates, getCandlestickData } from '../utils/api';
+import {
+  calculateRSI,
+  calculateRSIArray,
+  calculateShortScore,
+  computeTimingScore,
+  dayHourDataIndex,
+  analyzeChartTrend,
+  analyzeDivergence,
+  calculateSupportResistance,
+  calculateStopLoss,
+  formatVolume,
+  getFundingSymbol,
+  calculateHourlyFundingRate,
+  calculateFundingPeriod,
+  calculateADX,
+  calculateATR
+} from '../utils/analysis';
+import { analyzeWeeklyPattern, analyzeMarketWeeklyPattern, type WeeklyPattern, type DayKey } from '../utils/weeklyPattern';
+import { analyzeDayHourPattern, analyzeMarketDayHourPattern, type DayHourPattern } from '../utils/hourlyPattern';
+import type { CoinScore } from '../types';
+import { CustomChart } from './CustomChart';
+import { DayHourHeatmap } from './DayHourHeatmap';
+import './ShortAnalysis.css';
+
+export function ShortAnalysis() {
+  const [coinScores, setCoinScores] = useState<CoinScore[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [progress, setProgress] = useState({ current: 0, total: 10 });
+  const [expandedChart, setExpandedChart] = useState<string | null>(null);
+  const [searchSymbol, setSearchSymbol] = useState('');
+  const [searchResult, setSearchResult] = useState<CoinScore | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
+  const [filteredSymbols, setFilteredSymbols] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [marketWeeklyPattern, setMarketWeeklyPattern] = useState<WeeklyPattern | null>(null);
+  const [marketDayHourPattern, setMarketDayHourPattern] = useState<DayHourPattern | null>(null);
+  const [currentTimeFavorable, setCurrentTimeFavorable] = useState<{
+    isFavorable: boolean;
+    dayWinRate: number;
+    hourAvgChange: number;
+    message: string;
+  } | null>(null);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setProgress({ current: 0, total: 10 });
+
+      const [tradingSymbols, tickers, fundingDict] = await Promise.all([
+        getTradingSymbols(),
+        getTicker24hr(),
+        getFundingRates()
+      ]);
+
+      // 거래 가능한 심볼 목록 저장 (자동완성용)
+      const symbolsArray = Array.from(tradingSymbols).sort();
+      setAvailableSymbols(symbolsArray);
+
+      // 상승률 상위 10개 코인 필터링
+      const validTickers = tickers
+        .filter(ticker =>
+          tradingSymbols.has(ticker.symbol) &&
+          parseFloat(ticker.priceChangePercent) > 0
+        )
+        .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))
+        .slice(0, 10);
+
+      const scores: CoinScore[] = [];
+
+      for (let i = 0; i < validTickers.length; i++) {
+        const ticker = validTickers[i];
+        setProgress({ current: i + 1, total: validTickers.length });
+
+        try {
+          // 1시간봉 500개 가져오기
+          const klines = await getCandlestickData(ticker.symbol, '1h', 500);
+
+          if (!klines || klines.length < 14) {
+            continue;
+          }
+
+          // 종가 추출
+          const closes = klines.map(k => parseFloat(k[4]));
+
+          // RSI 계산 (암호화폐 최적화: period 9)
+          const rsi = calculateRSI(closes, 9);
+          
+          // RSI 배열 계산 (다이버전스 분석용)
+          const rsiArray = calculateRSIArray(closes, 9);
+          
+          // ADX 계산 (트렌드 강도 측정)
+          const adxResult = calculateADX(klines, 14);
+          
+          // ATR 계산 (변동성 측정)
+          const atr = calculateATR(klines, 14);
+
+          // 다이버전스 분석 (1시간봉)
+          const divergenceAnalysis = analyzeDivergence(klines, rsiArray);
+
+          // 하락 다이버전스인 경우 5분봉도 분석
+          if (divergenceAnalysis.divergence_type === 'bearish' || !divergenceAnalysis.has_divergence) {
+            try {
+              const klines5m = await getCandlestickData(ticker.symbol, '5m', 500);
+              if (klines5m && klines5m.length >= 14) {
+                const closes5m = klines5m.map(k => parseFloat(k[4]));
+                const rsiArray5m = calculateRSIArray(closes5m, 14);
+                const divergenceAnalysis5m = analyzeDivergence(klines5m, rsiArray5m);
+                
+                // 5분봉에서 하락 다이버전스가 감지되면 peaks_5m에 추가
+                if (divergenceAnalysis5m.divergence_type === 'bearish' && divergenceAnalysis5m.peaks) {
+                  divergenceAnalysis.peaks_5m = divergenceAnalysis5m.peaks;
+                }
+              }
+            } catch (err) {
+              console.error(`5분봉 다이버전스 분석 실패 ${ticker.symbol}:`, err);
+            }
+          }
+
+          // Short 점수 계산 (ADX, ATR 추가)
+          const shortScore = calculateShortScore(
+            ticker.symbol,
+            ticker,
+            fundingDict,
+            klines,
+            rsi,
+            divergenceAnalysis,
+            adxResult,
+            atr
+          );
+
+          // 차트 트렌드 분석
+          const trendAnalysis = analyzeChartTrend(klines);
+
+          // 저항선/지지선 계산
+          const supportResistance = calculateSupportResistance(klines, 20);
+
+          // 손절가/목표가 계산
+          const stopLossInfo = calculateStopLoss(supportResistance, 'short', 2.0);
+
+          // 펀딩비 정보 계산
+          const fundingInfo = fundingDict[ticker.symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
+          const fundingRate = fundingInfo.lastFundingRate * 100;
+          const fundingPeriod = calculateFundingPeriod(fundingInfo.nextFundingTime);
+          const hourlyFundingRate = calculateHourlyFundingRate(
+            fundingInfo.lastFundingRate,
+            fundingInfo.nextFundingTime
+          ) * 100; // 퍼센트로 변환
+
+          scores.push({
+            symbol: ticker.symbol,
+            ticker,
+            short_score: shortScore,
+            rsi,
+            funding_rate: fundingRate,
+            hourly_funding_rate: hourlyFundingRate,
+            funding_period: fundingPeriod,
+            adx: adxResult,
+            atr: atr,
+            trend_analysis: trendAnalysis,
+            support_resistance: supportResistance,
+            stop_loss_info: stopLossInfo,
+            divergence_analysis: divergenceAnalysis
+          });
+        } catch (err) {
+          console.error(`Error processing ${ticker.symbol}:`, err);
+        }
+      }
+
+      // Short 점수 기준 정렬 (타이밍 반영 전)
+      scores.sort((a, b) => b.short_score - a.short_score);
+
+      // 거래량 TOP10 코인 (요일별·요일+시간대별 패턴 분석에서 제외)
+      const top10ByVolume = tickers
+        .filter(ticker => tradingSymbols.has(ticker.symbol))
+        .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+        .slice(0, 10)
+        .map(ticker => ticker.symbol);
+      const altcoinsForPattern = scores.filter(coin => !top10ByVolume.includes(coin.symbol));
+
+      let marketWeeklyPatternLocal: WeeklyPattern | null = null;
+      let marketDayHourPatternLocal: DayHourPattern | null = null;
+
+      // 요일별 패턴 분석 (일봉 데이터 사용)
+      try {
+        const weeklyPatternPromises = altcoinsForPattern.map(async (coin) => {
+          try {
+            const dailyKlines = await getCandlestickData(coin.symbol, '1d', 60);
+            if (dailyKlines && dailyKlines.length >= 7) {
+              const pattern = analyzeWeeklyPattern(dailyKlines);
+              return { symbol: coin.symbol, pattern };
+            }
+            return { symbol: coin.symbol, pattern: null };
+          } catch (err) {
+            console.error(`요일별 패턴 분석 실패 ${coin.symbol}:`, err);
+            return { symbol: coin.symbol, pattern: null };
+          }
+        });
+
+        const weeklyPatterns = await Promise.all(weeklyPatternPromises);
+        marketWeeklyPatternLocal = analyzeMarketWeeklyPattern(weeklyPatterns);
+        setMarketWeeklyPattern(marketWeeklyPatternLocal);
+      } catch (err) {
+        console.error('요일별 패턴 분석 실패:', err);
+      }
+
+      // 요일+시간대별 패턴 분석 (1시간봉 데이터 사용, 60일 = 1440시간)
+      try {
+        const dayHourPatternPromises = altcoinsForPattern.map(async (coin) => {
+          try {
+            // 60일치 1시간봉 데이터 가져오기 (60일 × 24시간 = 1440개)
+            const hourlyKlines = await getCandlestickData(coin.symbol, '1h', 1440);
+            if (hourlyKlines && hourlyKlines.length >= 24) {
+              const pattern = analyzeDayHourPattern(hourlyKlines);
+              return { symbol: coin.symbol, pattern };
+            }
+            return { symbol: coin.symbol, pattern: null };
+          } catch (err) {
+            console.error(`요일+시간대별 패턴 분석 실패 ${coin.symbol}:`, err);
+            return { symbol: coin.symbol, pattern: null };
+          }
+        });
+
+        const dayHourPatterns = await Promise.all(dayHourPatternPromises);
+        marketDayHourPatternLocal = analyzeMarketDayHourPattern(dayHourPatterns);
+        setMarketDayHourPattern(marketDayHourPatternLocal);
+
+        // 현재 시간이 Short에 유리한지 체크
+        if (marketDayHourPatternLocal && marketWeeklyPatternLocal) {
+          const now = new Date();
+          // 한국 시간(UTC+9) 계산
+          const utcHour = now.getUTCHours();
+          const utcDay = now.getUTCDay();
+          const kstHour = (utcHour + 9) % 24;
+          // 한국 시간으로 요일 계산 (UTC+9 시간대에서 하루가 넘어가는 경우 고려)
+          const kstDayOffset = utcHour + 9 >= 24 ? 1 : 0;
+          const currentDay = (utcDay + kstDayOffset) % 7;
+          const currentHour = kstHour;
+
+          const dayMap: Record<number, DayKey> = {
+            0: 'sunday', 1: 'monday', 2: 'tuesday', 3: 'wednesday',
+            4: 'thursday', 5: 'friday', 6: 'saturday',
+          };
+          const dayKey = dayMap[currentDay];
+          const dayPattern = marketWeeklyPatternLocal[dayKey];
+          const dayWinRate = dayPattern?.winRate ?? 0.5;
+
+          const di = dayHourDataIndex(currentDay);
+          const hourData = marketDayHourPatternLocal.data[di]?.[currentHour];
+          const hourAvgChange = hourData?.avgChange ?? 0;
+
+          const isFavorable = dayWinRate > 0.5 && hourAvgChange < 0;
+          const dayNames = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+          const message = isFavorable
+            ? `✅ 현재 시간대(${dayNames[currentDay]} ${currentHour}시)는 Short에 유리합니다 (요일 하락 확률: ${(dayWinRate * 100).toFixed(1)}%, 시간대 평균: ${hourAvgChange.toFixed(2)}%)`
+            : `⚠️ 현재 시간대(${dayNames[currentDay]} ${currentHour}시)는 Short에 불리할 수 있습니다 (요일 하락 확률: ${(dayWinRate * 100).toFixed(1)}%, 시간대 평균: ${hourAvgChange.toFixed(2)}%)`;
+
+          setCurrentTimeFavorable({
+            isFavorable,
+            dayWinRate,
+            hourAvgChange,
+            message,
+          });
+        }
+
+        // 점수에 요일별·요일+시간대별 타이밍 반영 (비중 25%)
+        const timingScore = computeTimingScore(marketWeeklyPatternLocal, marketDayHourPatternLocal);
+        for (const c of scores) {
+          const base = c.short_score; // base는 이미 0~75 범위
+          c.short_score = Math.min(100, base + 0.25 * (timingScore * 100));
+        }
+        scores.sort((a, b) => b.short_score - a.short_score);
+      } catch (err) {
+        console.error('요일+시간대별 패턴 분석 실패:', err);
+      }
+
+      setCoinScores([...scores]);
+      setLastUpdate(new Date());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '데이터를 가져오는데 실패했습니다.');
+    } finally {
+      setLoading(false);
+      setProgress({ current: 0, total: 10 });
+    }
+  };
+
+  const analyzeCoin = async (symbol: string): Promise<CoinScore | null> => {
+    try {
+      const [tradingSymbols, tickers, fundingDict] = await Promise.all([
+        getTradingSymbols(),
+        getTicker24hr(),
+        getFundingRates()
+      ]);
+
+      // 심볼이 거래 가능한지 확인
+      if (!tradingSymbols.has(symbol)) {
+        throw new Error(`거래 가능한 코인이 아닙니다: ${symbol}`);
+      }
+
+      // 티커 데이터 찾기
+      const ticker = tickers.find(t => t.symbol === symbol);
+      if (!ticker) {
+        throw new Error(`티커 데이터를 찾을 수 없습니다: ${symbol}`);
+      }
+
+      // 1시간봉 500개 가져오기
+      const klines = await getCandlestickData(symbol, '1h', 500);
+
+      if (!klines || klines.length < 14) {
+        throw new Error(`충분한 차트 데이터가 없습니다: ${symbol}`);
+      }
+
+      // 종가 추출
+      const closes = klines.map(k => parseFloat(k[4]));
+
+      // RSI 계산 (암호화폐 최적화: period 9)
+      const rsi = calculateRSI(closes, 9);
+      
+      // RSI 배열 계산 (다이버전스 분석용)
+      const rsiArray = calculateRSIArray(closes, 9);
+      
+      // ADX 계산 (트렌드 강도 측정)
+      const adxResult = calculateADX(klines, 14);
+      
+      // ATR 계산 (변동성 측정)
+      const atr = calculateATR(klines, 14);
+
+      // 다이버전스 분석 (1시간봉)
+      const divergenceAnalysis = analyzeDivergence(klines, rsiArray);
+
+      // 하락 다이버전스인 경우 5분봉도 분석
+      if (divergenceAnalysis.divergence_type === 'bearish' || !divergenceAnalysis.has_divergence) {
+        try {
+          const klines5m = await getCandlestickData(symbol, '5m', 500);
+          if (klines5m && klines5m.length >= 14) {
+            const closes5m = klines5m.map(k => parseFloat(k[4]));
+            const rsiArray5m = calculateRSIArray(closes5m, 14);
+            const divergenceAnalysis5m = analyzeDivergence(klines5m, rsiArray5m);
+            
+            // 5분봉에서 하락 다이버전스가 감지되면 peaks_5m에 추가
+            if (divergenceAnalysis5m.divergence_type === 'bearish' && divergenceAnalysis5m.peaks) {
+              divergenceAnalysis.peaks_5m = divergenceAnalysis5m.peaks;
+            }
+          }
+        } catch (err) {
+          console.error(`5분봉 다이버전스 분석 실패 ${symbol}:`, err);
+        }
+      }
+
+      // Short 점수 계산 (ADX, ATR 추가)
+      const shortScore = calculateShortScore(
+        symbol,
+        ticker,
+        fundingDict,
+        klines,
+        rsi,
+        divergenceAnalysis,
+        adxResult,
+        atr
+      );
+
+      // 차트 트렌드 분석
+      const trendAnalysis = analyzeChartTrend(klines);
+
+      // 저항선/지지선 계산
+      const supportResistance = calculateSupportResistance(klines, 20);
+
+      // 손절가/목표가 계산
+      const stopLossInfo = calculateStopLoss(supportResistance, 'short', 2.0);
+
+      // 펀딩비 정보 계산
+      const fundingInfo = fundingDict[symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
+      const fundingRate = fundingInfo.lastFundingRate * 100;
+      const fundingPeriod = calculateFundingPeriod(fundingInfo.nextFundingTime);
+      const hourlyFundingRate = calculateHourlyFundingRate(
+        fundingInfo.lastFundingRate,
+        fundingInfo.nextFundingTime
+      ) * 100; // 퍼센트로 변환
+
+      return {
+        symbol,
+        ticker,
+        short_score: shortScore,
+        rsi,
+        funding_rate: fundingRate,
+        hourly_funding_rate: hourlyFundingRate,
+        funding_period: fundingPeriod,
+        adx: adxResult,
+        atr: atr,
+        trend_analysis: trendAnalysis,
+        support_resistance: supportResistance,
+        stop_loss_info: stopLossInfo,
+        divergence_analysis: divergenceAnalysis
+      };
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const handleSearchInputChange = (value: string) => {
+    setSearchSymbol(value);
+    setSearchError(null);
+    
+    if (value.trim().length > 0) {
+      const upperValue = value.toUpperCase();
+      const filtered = availableSymbols
+        .filter(symbol => symbol.includes(upperValue))
+        .slice(0, 10); // 최대 10개만 표시
+      setFilteredSymbols(filtered);
+      setShowSuggestions(filtered.length > 0);
+    } else {
+      setFilteredSymbols([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleSymbolSelect = (symbol: string) => {
+    setSearchSymbol(symbol);
+    setShowSuggestions(false);
+    setFilteredSymbols([]);
+    // 자동으로 검색 실행
+    handleSearch(symbol);
+  };
+
+  const handleSearch = async (symbolToSearch?: string) => {
+    const symbol = (symbolToSearch || searchSymbol).trim().toUpperCase();
+    
+    if (!symbol) {
+      setSearchError('코인 심볼을 입력해주세요.');
+      return;
+    }
+
+    setSearchLoading(true);
+    setSearchError(null);
+    setSearchResult(null);
+    setShowSuggestions(false);
+
+    try {
+      const result = await analyzeCoin(symbol);
+      setSearchResult(result);
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : '코인 분석에 실패했습니다.');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  if (loading && coinScores.length === 0) {
+    return (
+      <div className="loading-container">
+        <div className="spinner"></div>
+        <p>바이낸스 선물 시장 데이터 수집 중...</p>
+        {progress.total > 0 && (
+          <p>
+            상위 10개 코인 분석 중... ({progress.current}/{progress.total})
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="error-container">
+        <p>오류: {error}</p>
+        <button onClick={fetchData}>다시 시도</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="short-analysis">
+      <div className="header">
+        <h1>Short 적합도 순위 (상위 10개 코인)</h1>
+        <div className="daytrader-mode-info">
+          <span className="mode-badge">⭐ 데이트레이더 모드</span>
+          <span className="mode-description">상위 3개 코인은 별도 강조 표시됩니다 (하루 1~2회 매매 추천)</span>
+        </div>
+        {lastUpdate && (
+          <p className="update-time">
+            업데이트 시간: {lastUpdate.toLocaleString('ko-KR')}
+          </p>
+        )}
+        <button onClick={fetchData} className="refresh-btn" disabled={loading}>
+          {loading ? '업데이트 중...' : '새로고침'}
+        </button>
+      </div>
+
+      <div className="search-section">
+        <h3>코인 검색</h3>
+        <div className="search-container">
+          <div className="search-input-wrapper">
+            <input
+              type="text"
+              value={searchSymbol}
+              onChange={(e) => handleSearchInputChange(e.target.value)}
+              onKeyPress={handleKeyPress}
+              onFocus={() => {
+                if (filteredSymbols.length > 0) {
+                  setShowSuggestions(true);
+                }
+              }}
+              onBlur={() => {
+                // 약간의 지연을 두어 클릭 이벤트가 먼저 실행되도록
+                setTimeout(() => setShowSuggestions(false), 200);
+              }}
+              placeholder="코인 심볼 입력 (예: BTCUSDT)"
+              className="search-input"
+            />
+            {showSuggestions && filteredSymbols.length > 0 && (
+              <div className="suggestions-dropdown">
+                {filteredSymbols.map((symbol) => (
+                  <div
+                    key={symbol}
+                    className="suggestion-item"
+                    onClick={() => handleSymbolSelect(symbol)}
+                    onMouseDown={(e) => e.preventDefault()} // onBlur보다 먼저 실행되도록
+                  >
+                    {symbol}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => handleSearch()}
+            disabled={searchLoading || !searchSymbol.trim()}
+            className="search-btn"
+          >
+            {searchLoading ? '분석 중...' : '검색'}
+          </button>
+        </div>
+        {searchError && (
+          <div className="search-error">
+            {searchError}
+          </div>
+        )}
+      </div>
+
+      {searchResult && (
+        <div className="search-result-section">
+          <h2>검색 결과: {searchResult.symbol}</h2>
+          <div className="coin-score-card search-result-card">
+            <div className="coin-score-header">
+              <div className="coin-rank">검색</div>
+              <div className="coin-symbol">
+                <a 
+                  href={`https://www.binance.com/en/futures/${searchResult.symbol}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="coin-link"
+                  title="바이낸스 선물 거래 페이지에서 보기"
+                >
+                  {searchResult.symbol}
+                </a>
+              </div>
+              <div className="short-score">
+                Short 점수: <strong>{searchResult.short_score.toFixed(2)}/100</strong>
+              </div>
+              <div className="chart-buttons">
+                <button
+                  onClick={() => {
+                    if (expandedChart === searchResult.symbol) {
+                      setExpandedChart(null);
+                    } else {
+                      setExpandedChart(searchResult.symbol);
+                    }
+                  }}
+                  className="chart-toggle-btn"
+                  title="차트 토글"
+                >
+                  {expandedChart === searchResult.symbol ? '📉 차트 숨기기' : '📈 차트 보기'}
+                </button>
+                <a
+                  href={`https://www.binance.com/en/futures/${searchResult.symbol}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="chart-btn"
+                  title="바이낸스에서 보기"
+                >
+                  🔗 바이낸스
+                </a>
+              </div>
+            </div>
+
+            {expandedChart === searchResult.symbol && (
+              <div className="chart-section">
+                <CustomChart 
+                  symbol={searchResult.symbol} 
+                  height={400}
+                  supportResistance={searchResult.support_resistance}
+                  stopLossInfo={searchResult.stop_loss_info}
+                  divergenceAnalysis={searchResult.divergence_analysis}
+                  adxResult={searchResult.adx}
+                />
+              </div>
+            )}
+
+            <div className="coin-details">
+              <div className="detail-section">
+                <h4>기본 정보</h4>
+                <div className="detail-grid">
+                  <div className="detail-item">
+                    <span className="detail-label">펀딩비({searchResult.funding_period}h):</span>
+                    <span className={`detail-value ${searchResult.funding_rate > 0.01 ? 'long-fee' : searchResult.funding_rate < -0.01 ? 'short-fee' : ''}`}>
+                      {searchResult.funding_rate.toFixed(4)}% {getFundingSymbol(searchResult.funding_rate)}
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">시간당 펀딩비:</span>
+                    <span className={`detail-value ${searchResult.hourly_funding_rate > 0.01 ? 'long-fee' : searchResult.hourly_funding_rate < -0.01 ? 'short-fee' : ''}`}>
+                      {searchResult.hourly_funding_rate.toFixed(4)}%
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">RSI:</span>
+                    <span className={`detail-value ${searchResult.rsi > 75 ? 'overbought' : searchResult.rsi < 25 ? 'oversold' : ''}`}>
+                      {searchResult.rsi.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">ADX (트렌드 강도):</span>
+                    <span className={`detail-value ${
+                      searchResult.adx.trend_strength === 'strong' ? 'strong-trend' : 
+                      searchResult.adx.trend_strength === 'moderate' ? 'moderate-trend' : 'weak-trend'
+                    }`}>
+                      {searchResult.adx.adx.toFixed(1)} ({searchResult.adx.trend_strength === 'strong' ? '강함' : searchResult.adx.trend_strength === 'moderate' ? '보통' : '약함'}, {searchResult.adx.trend_direction === 'down' ? '하락' : searchResult.adx.trend_direction === 'up' ? '상승' : '중립'})
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">ATR (변동성):</span>
+                    <span className="detail-value">
+                      ${searchResult.atr.toFixed(4)} ({(searchResult.atr / parseFloat(searchResult.ticker.lastPrice) * 100).toFixed(2)}%)
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">차트 트렌드:</span>
+                    <span className="detail-value">
+                      {searchResult.trend_analysis.trend} ({searchResult.trend_analysis.price_change > 0 ? '+' : ''}{searchResult.trend_analysis.price_change.toFixed(2)}%)
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">다이버전스:</span>
+                    <span className={`detail-value ${
+                      searchResult.divergence_analysis.divergence_type === 'bearish' ? 'bearish-divergence' : 
+                      searchResult.divergence_analysis.divergence_type === 'bullish' ? 'bullish-divergence' : ''
+                    }`}>
+                      {searchResult.divergence_analysis.has_divergence 
+                        ? (searchResult.divergence_analysis.divergence_type === 'bearish' ? '🔻 하락' : '🔺 상승')
+                        : '없음'}
+                      {searchResult.divergence_analysis.has_divergence && ` (강도: ${(searchResult.divergence_analysis.strength * 100).toFixed(0)}%)`}
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">현재가:</span>
+                    <span className="detail-value">
+                      ${parseFloat(searchResult.ticker.lastPrice).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">24h 변동률:</span>
+                    <span className={`detail-value ${parseFloat(searchResult.ticker.priceChangePercent) > 0 ? 'positive' : 'negative'}`}>
+                      {parseFloat(searchResult.ticker.priceChangePercent) > 0 ? '+' : ''}{parseFloat(searchResult.ticker.priceChangePercent).toFixed(2)}%
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">거래량:</span>
+                    <span className="detail-value">{formatVolume(parseFloat(searchResult.ticker.quoteVolume))} USDT</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="detail-section">
+                <h4>지지/저항선</h4>
+                <div className="detail-grid">
+                  <div className="detail-item">
+                    <span className="detail-label">저항선:</span>
+                    <span className="detail-value">
+                      ${searchResult.support_resistance.resistance.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">지지선:</span>
+                    <span className="detail-value">
+                      ${searchResult.support_resistance.support.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">단기 저항선:</span>
+                    <span className="detail-value">
+                      ${searchResult.support_resistance.short_term_resistance.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                    </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">단기 지지선:</span>
+                    <span className="detail-value">
+                      ${searchResult.support_resistance.short_term_support.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="detail-section stop-loss-section">
+                <h4>손절선/익절선</h4>
+                <div className="stop-loss-grid">
+                  <div className="stop-loss-item">
+                    <span className="stop-loss-label">손절선</span>
+                    <span className="stop-loss-value">
+                      ${searchResult.stop_loss_info.stop_loss.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                    </span>
+                    <span className="stop-loss-percent">
+                      (현재가 대비 {searchResult.stop_loss_info.risk_percent > 0 ? '+' : ''}{searchResult.stop_loss_info.risk_percent.toFixed(2)}%)
+                    </span>
+                  </div>
+                  <div className="stop-loss-item">
+                    <span className="stop-loss-label">익절선</span>
+                    <span className="stop-loss-value">
+                      ${searchResult.stop_loss_info.target_price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                    </span>
+                    <span className="stop-loss-percent">
+                      (현재가 대비 {searchResult.stop_loss_info.reward_percent > 0 ? '+' : ''}{searchResult.stop_loss_info.reward_percent.toFixed(2)}%)
+                    </span>
+                  </div>
+                  <div className="risk-reward">
+                    <span className="risk-reward-label">리스크/리워드 비율:</span>
+                    <span className="risk-reward-value">1:{searchResult.stop_loss_info.risk_reward_ratio.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {currentTimeFavorable && (
+        <div className={`time-favorable-banner ${currentTimeFavorable.isFavorable ? 'favorable' : 'unfavorable'}`}>
+          <div className="banner-content">
+            <span className="banner-icon">{currentTimeFavorable.isFavorable ? '✅' : '⚠️'}</span>
+            <span className="banner-message">{currentTimeFavorable.message}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="score-info">
+        <h3>점수 계산 기준:</h3>
+        <ul>
+          <li>요일·시간대 타이밍: 25% (현재 요일·시간대가 Short에 유리할수록 가산)</li>
+          <li>ADX 트렌드: 18% (하락 트렌드이고 강할수록 유리, 횡보장 필터링)</li>
+          <li>RSI: 18% (높을수록 과매수, Short에 유리, period 9 최적화)</li>
+          <li>펀딩비: 17% (시간당 펀딩비 기준, 높을수록 Short에 유리)</li>
+          <li>다이버전스: 8% (하락 다이버전스일수록 유리, ADX 필터 적용)</li>
+          <li>거래량: 7% (높을수록 유동성 좋음)</li>
+          <li>ATR 리스크: 7% (변동성이 낮을수록 리스크 적음)</li>
+        </ul>
+        <p className="score-note">※ 가격 변동률은 ADX 트렌드와 중복되어 제거되었습니다. 요일별·요일+시간대별 패턴으로 타이밍 점수를 반영합니다.</p>
+      </div>
+
+      {marketWeeklyPattern && (
+        <div className="weekly-pattern-section">
+          <h3>요일별 알트코인 변화량 패턴 (한국시간 기준, 최근 60일 분석)</h3>
+          <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+            ※ 거래량 TOP10 코인(BTC, ETH, BNB, XRP 등)은 제외하고 계산됩니다.
+          </p>
+          <div className="weekly-pattern-summary">
+            <div className="pattern-highlight">
+              <span className="highlight-label">Short에 가장 유리한 요일:</span>
+              <span className="highlight-value best">{marketWeeklyPattern.bestDay}</span>
+              <span className="highlight-detail">
+                {(() => {
+                  const dayMap: Record<string, DayKey> = {
+                    '월요일': 'monday',
+                    '화요일': 'tuesday',
+                    '수요일': 'wednesday',
+                    '목요일': 'thursday',
+                    '금요일': 'friday',
+                    '토요일': 'saturday',
+                    '일요일': 'sunday',
+                  };
+                  const pattern = marketWeeklyPattern[dayMap[marketWeeklyPattern.bestDay] ?? 'monday'];
+                  return `(하락 확률: ${((pattern?.winRate ?? 0) * 100).toFixed(1)}%)`;
+                })()}
+              </span>
+            </div>
+            <div className="pattern-highlight">
+              <span className="highlight-label">Short에 가장 불리한 요일:</span>
+              <span className="highlight-value worst">{marketWeeklyPattern.worstDay}</span>
+              <span className="highlight-detail">
+                {(() => {
+                  const dayMap: Record<string, DayKey> = {
+                    '월요일': 'monday',
+                    '화요일': 'tuesday',
+                    '수요일': 'wednesday',
+                    '목요일': 'thursday',
+                    '금요일': 'friday',
+                    '토요일': 'saturday',
+                    '일요일': 'sunday',
+                  };
+                  const pattern = marketWeeklyPattern[dayMap[marketWeeklyPattern.worstDay] ?? 'monday'];
+                  return `(하락 확률: ${((pattern?.winRate ?? 0) * 100).toFixed(1)}%)`;
+                })()}
+              </span>
+            </div>
+          </div>
+          <div className="weekly-pattern-grid">
+            {[
+              { key: 'monday', label: '월요일', pattern: marketWeeklyPattern.monday },
+              { key: 'tuesday', label: '화요일', pattern: marketWeeklyPattern.tuesday },
+              { key: 'wednesday', label: '수요일', pattern: marketWeeklyPattern.wednesday },
+              { key: 'thursday', label: '목요일', pattern: marketWeeklyPattern.thursday },
+              { key: 'friday', label: '금요일', pattern: marketWeeklyPattern.friday },
+              { key: 'saturday', label: '토요일', pattern: marketWeeklyPattern.saturday },
+              { key: 'sunday', label: '일요일', pattern: marketWeeklyPattern.sunday },
+            ].map(({ key, label, pattern }) => {
+              // 하락에 유리하면 빨간색, 상승에 유리하면 초록색
+              const isFavorableForShort = pattern.winRate > 0.5; // 하락 확률이 50% 초과면 Short 유리
+              const colorClass = isFavorableForShort ? 'favorable-short' : 'favorable-long';
+              const bestWorstClass = key === marketWeeklyPattern.bestDay.toLowerCase() ? 'best-day' : key === marketWeeklyPattern.worstDay.toLowerCase() ? 'worst-day' : '';
+              
+              return (
+              <div key={key} className={`weekly-pattern-card ${colorClass} ${bestWorstClass}`}>
+                <div className="pattern-day">{label}</div>
+                <div className="pattern-stats">
+                  <div className="stat-item">
+                    <span className="stat-label">하락 확률:</span>
+                    <span className={`stat-value ${pattern.winRate > 0.5 ? 'good' : 'bad'}`}>
+                      {(pattern.winRate * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">ATR(14) 평균:</span>
+                    <span className="stat-value">
+                      {pattern.avgAtrPct > 0 ? pattern.avgAtrPct.toFixed(2) : '-'}%
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">상승/하락:</span>
+                    <span className="stat-value">
+                      {pattern.positiveCount}회 / {pattern.negativeCount}회
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">변화 범위:</span>
+                    <span className="stat-value">
+                      {pattern.minChange.toFixed(2)}% ~ {pattern.maxChange.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+            })}
+          </div>
+        </div>
+      )}
+
+      {marketDayHourPattern && (
+        <div className="hourly-pattern-section">
+          <h3>요일+시간대별 알트코인 변화량 패턴 (한국시간 9:00 기준, 최근 60일 분석)</h3>
+          <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+            ※ 거래량 TOP10 코인(BTC, ETH, BNB, XRP 등)은 제외하고 계산됩니다.
+          </p>
+          <DayHourHeatmap pattern={marketDayHourPattern} />
+        </div>
+      )}
+
+      <div className="coin-scores-list">
+        {coinScores.map((coin, idx) => {
+          const priceChange = parseFloat(coin.ticker.priceChangePercent);
+          const quoteVolume = parseFloat(coin.ticker.quoteVolume);
+          const lastPrice = parseFloat(coin.ticker.lastPrice);
+          const isTop3 = idx < 3; // 상위 3개 강조
+
+          return (
+            <div key={coin.symbol} className={`coin-score-card ${isTop3 ? 'top-3-highlight' : ''}`}>
+              <div className="coin-score-header">
+                <div className="coin-rank">#{idx + 1}</div>
+                <div className="coin-symbol">
+                  <a 
+                    href={`https://www.binance.com/en/futures/${coin.symbol}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="coin-link"
+                    title="바이낸스 선물 거래 페이지에서 보기"
+                  >
+                    {coin.symbol}
+                  </a>
+                </div>
+                <div className="short-score">
+                  Short 점수: <strong>{coin.short_score.toFixed(2)}/100</strong>
+                </div>
+                <div className="chart-buttons">
+                  <button
+                    onClick={() => {
+                      if (expandedChart === coin.symbol) {
+                        setExpandedChart(null);
+                      } else {
+                        setExpandedChart(coin.symbol);
+                      }
+                    }}
+                    className="chart-toggle-btn"
+                    title="차트 토글"
+                  >
+                    {expandedChart === coin.symbol ? '📉 차트 숨기기' : '📈 차트 보기'}
+                  </button>
+                  <a
+                    href={`https://www.binance.com/en/futures/${coin.symbol}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="chart-btn"
+                    title="바이낸스에서 보기"
+                  >
+                    🔗 바이낸스
+                  </a>
+                </div>
+              </div>
+
+              {expandedChart === coin.symbol && (
+                <div className="chart-section">
+                  <CustomChart 
+                    symbol={coin.symbol} 
+                    height={400}
+                    supportResistance={coin.support_resistance}
+                    stopLossInfo={coin.stop_loss_info}
+                    divergenceAnalysis={coin.divergence_analysis}
+                    adxResult={coin.adx}
+                  />
+                </div>
+              )}
+
+              <div className="coin-details">
+                <div className="detail-section">
+                  <h4>기본 정보</h4>
+                  <div className="detail-grid">
+                    <div className="detail-item">
+                      <span className="detail-label">펀딩비({coin.funding_period}h):</span>
+                      <span className={`detail-value ${coin.funding_rate > 0.01 ? 'long-fee' : coin.funding_rate < -0.01 ? 'short-fee' : ''}`}>
+                        {coin.funding_rate.toFixed(4)}% {getFundingSymbol(coin.funding_rate)}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">시간당 펀딩비:</span>
+                      <span className={`detail-value ${coin.hourly_funding_rate > 0.01 ? 'long-fee' : coin.hourly_funding_rate < -0.01 ? 'short-fee' : ''}`}>
+                        {coin.hourly_funding_rate.toFixed(4)}%
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">RSI:</span>
+                      <span className={`detail-value ${coin.rsi > 75 ? 'overbought' : coin.rsi < 25 ? 'oversold' : ''}`}>
+                        {coin.rsi.toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">ADX (트렌드 강도):</span>
+                      <span className={`detail-value ${
+                        coin.adx.trend_strength === 'strong' ? 'strong-trend' : 
+                        coin.adx.trend_strength === 'moderate' ? 'moderate-trend' : 'weak-trend'
+                      }`}>
+                        {coin.adx.adx.toFixed(1)} ({coin.adx.trend_strength === 'strong' ? '강함' : coin.adx.trend_strength === 'moderate' ? '보통' : '약함'}, {coin.adx.trend_direction === 'down' ? '하락' : coin.adx.trend_direction === 'up' ? '상승' : '중립'})
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">ATR (변동성):</span>
+                      <span className="detail-value">
+                        ${coin.atr.toFixed(4)} ({(coin.atr / lastPrice * 100).toFixed(2)}%)
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">차트 트렌드:</span>
+                      <span className="detail-value">
+                        {coin.trend_analysis.trend} ({coin.trend_analysis.price_change > 0 ? '+' : ''}{coin.trend_analysis.price_change.toFixed(2)}%)
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">다이버전스:</span>
+                      <span className={`detail-value ${
+                        coin.divergence_analysis.divergence_type === 'bearish' ? 'bearish-divergence' : 
+                        coin.divergence_analysis.divergence_type === 'bullish' ? 'bullish-divergence' : ''
+                      }`}>
+                        {coin.divergence_analysis.has_divergence 
+                          ? (coin.divergence_analysis.divergence_type === 'bearish' ? '🔻 하락' : '🔺 상승')
+                          : '없음'}
+                        {coin.divergence_analysis.has_divergence && ` (강도: ${(coin.divergence_analysis.strength * 100).toFixed(0)}%)`}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">현재가:</span>
+                      <span className="detail-value">
+                        ${lastPrice.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">24h 변동률:</span>
+                      <span className={`detail-value ${priceChange > 0 ? 'positive' : 'negative'}`}>
+                        {priceChange > 0 ? '+' : ''}{priceChange.toFixed(2)}%
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">거래량:</span>
+                      <span className="detail-value">{formatVolume(quoteVolume)} USDT</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="detail-section">
+                  <h4>지지/저항선</h4>
+                  <div className="detail-grid">
+                    <div className="detail-item">
+                      <span className="detail-label">저항선:</span>
+                      <span className="detail-value">
+                        ${coin.support_resistance.resistance.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">지지선:</span>
+                      <span className="detail-value">
+                        ${coin.support_resistance.support.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">단기 저항선:</span>
+                      <span className="detail-value">
+                        ${coin.support_resistance.short_term_resistance.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">단기 지지선:</span>
+                      <span className="detail-value">
+                        ${coin.support_resistance.short_term_support.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="detail-section stop-loss-section">
+                  <h4>손절선/익절선</h4>
+                  <div className="stop-loss-grid">
+                    <div className="stop-loss-item">
+                      <span className="stop-loss-label">손절선</span>
+                      <span className="stop-loss-value">
+                        ${coin.stop_loss_info.stop_loss.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </span>
+                      <span className="stop-loss-percent">
+                        (현재가 대비 {coin.stop_loss_info.risk_percent > 0 ? '+' : ''}{coin.stop_loss_info.risk_percent.toFixed(2)}%)
+                      </span>
+                    </div>
+                    <div className="stop-loss-item">
+                      <span className="stop-loss-label">익절선</span>
+                      <span className="stop-loss-value">
+                        ${coin.stop_loss_info.target_price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </span>
+                      <span className="stop-loss-percent">
+                        (현재가 대비 {coin.stop_loss_info.reward_percent > 0 ? '+' : ''}{coin.stop_loss_info.reward_percent.toFixed(2)}%)
+                      </span>
+                    </div>
+                    <div className="risk-reward">
+                      <span className="risk-reward-label">리스크/리워드 비율:</span>
+                      <span className="risk-reward-value">1:{coin.stop_loss_info.risk_reward_ratio.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

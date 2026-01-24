@@ -1,0 +1,118 @@
+.day-hour-heatmap-container {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 1rem 0;
+}
+
+.heatmap-header {
+  margin-bottom: 1rem;
+}
+
+.heatmap-legend {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.heatmap-wrapper {
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+.day-hour-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  min-width: 1200px;
+}
+
+.day-hour-table th {
+  padding: 0.5rem;
+  text-align: center;
+  font-weight: 600;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+}
+
+.day-header {
+  min-width: 50px;
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: #f8f9fa !important;
+}
+
+.hour-header {
+  min-width: 60px;
+  font-size: 0.75rem;
+}
+
+.day-label {
+  padding: 0.75rem 0.5rem;
+  text-align: center;
+  font-weight: 600;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  min-width: 50px;
+}
+
+.heatmap-cell {
+  padding: 0.5rem 0.25rem;
+  text-align: center;
+  border: 1px solid #e0e0e0;
+  min-width: 60px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  position: relative;
+}
+
+.heatmap-cell:hover {
+  opacity: 0.8;
+  z-index: 1;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.cell-value {
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .day-hour-table {
+    font-size: 0.75rem;
+  }
+  
+  .cell-value {
+    font-size: 0.7rem;
+  }
+  
+  .hour-header {
+    font-size: 0.7rem;
+    min-width: 50px;
+  }
+  
+  .heatmap-cell {
+    min-width: 50px;
+    padding: 0.4rem 0.2rem;
+  }
+}
