@@ -82,7 +82,7 @@ export function analyzeHourlyPattern(klines: Kline[]): HourlyPattern | null {
   }
 
   // 각 날의 9:00 가격을 기준으로 다른 시간대 변화량 계산
-  for (const [dateKey, dayData] of dayGroups.entries()) {
+  for (const [_dateKey, dayData] of dayGroups.entries()) {
     // 해당 날의 9:00 가격 찾기
     const nineAM = dayData.find(d => d.hour === 9);
     if (!nineAM) continue; // 9:00 데이터가 없으면 스킵
@@ -301,7 +301,7 @@ export function analyzeDayHourPattern(klines: Kline[]): DayHourPattern | null {
   }
 
   // 각 날의 9:00 가격을 기준으로 다른 시간대 변화량 계산
-  for (const [dateKey, dayData] of dayGroups.entries()) {
+  for (const [_dateKey, dayData] of dayGroups.entries()) {
     const nineAM = dayData.find(d => d.hour === 9);
     if (!nineAM) continue;
     

@@ -97,7 +97,7 @@ export async function getCandlestickData(
 /**
  * 재시도 로직이 포함된 fetch 함수
  */
-async function fetchWithRetry(url: string, maxRetries: number = 3, delay: number = 2000): Promise<Response> {
+export async function fetchWithRetry(url: string, maxRetries: number = 3, delay: number = 2000): Promise<Response> {
   let lastError: Error | null = null;
   
   for (let i = 0; i < maxRetries; i++) {

@@ -449,7 +449,6 @@ export function analyzeDivergence(klines: Kline[], rsiValues: number[]): Diverge
   // 최근 50개 봉에서 고점 찾기 (피크 감지)
   const lookbackPeriod = Math.min(50, klines.length);
   const recentHighs = highs.slice(-lookbackPeriod);
-  const recentCloses = closes.slice(-lookbackPeriod);
   const recentRSI = rsiValues.slice(-lookbackPeriod);
 
   // 고점 찾기 (주변 3개 봉보다 높은 지점)

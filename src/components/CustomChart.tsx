@@ -240,10 +240,6 @@ export function CustomChart({
         type: 'volume',
       },
       priceScaleId: 'volume', // 별도 price scale ID 지정
-      scaleMargins: {
-        top: 0.7, // 상단 70%는 캔들 차트
-        bottom: 0,
-      },
     });
 
     volumeSeriesRef.current = volumeSeries;
@@ -914,7 +910,7 @@ export function CustomChart({
 
     // 화면 범위 기반 데이터 로드 함수 (하이브리드 방식) - 현재 사용되지 않음
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _loadDataForVisibleRange = async (visibleFrom: Time, visibleTo: Time) => {
+    const _loadDataForVisibleRange = async (_visibleFrom: Time, _visibleTo: Time) => {
       // 이전 요청이 있으면 취소 (최신 조작만 처리)
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
