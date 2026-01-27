@@ -5,8 +5,12 @@ interface DayHourHeatmapProps {
   pattern: DayHourPattern;
 }
 
-/** 9시부터 표시하는 시간 순서: 9, 10, ..., 23, 0, 1, ..., 8 */
-const HOUR_ORDER = [...Array.from({ length: 15 }, (_, i) => i + 9), ...Array.from({ length: 9 }, (_, i) => i)];
+/** 9시부터 표시하는 시간 순서: 9, 10, ..., 23, 0, 1, ..., 8, 9(다음날) */
+const HOUR_ORDER = [
+  ...Array.from({ length: 15 }, (_, i) => i + 9), // 9~23
+  ...Array.from({ length: 9 }, (_, i) => i),      // 0~8
+  24                                              // 다음날 9시 (인덱스 24에 저장됨)
+];
 
 export function DayHourHeatmap({ pattern }: DayHourHeatmapProps) {
   const { data, dayNames } = pattern;
@@ -62,7 +66,8 @@ export function DayHourHeatmap({ pattern }: DayHourHeatmapProps) {
               <th className="day-header">요일</th>
               {HOUR_ORDER.map((h) => (
                 <th key={h} className="hour-header">
-                  {h}시
+                  {h === 24 ? '9' : h}시
+                  {h === 24 && <span className="next-day-label">(익)</span>}
                 </th>
               ))}
             </tr>
@@ -83,7 +88,7 @@ export function DayHourHeatmap({ pattern }: DayHourHeatmapProps) {
                         backgroundColor: color,
                         color: textColor,
                       }}
-                      title={`${dayNames[dayIndex]} ${hour}:00 (9:00 기준)\n평균 변화량: ${hourData.avgChange > 0 ? '+' : ''}${hourData.avgChange.toFixed(2)}%\n데이터 수: ${hourData.totalCount}일`}
+                      title={`${dayNames[dayIndex]} ${hour === 24 ? '다음날 9' : hour}:00 (9:00 기준)\n평균 변화량: ${hourData.avgChange > 0 ? '+' : ''}${hourData.avgChange.toFixed(2)}%\n데이터 수: ${hourData.totalCount}일`}
                     >
                       {hourData.avgChange !== 0 && (
                         <span className="cell-value">

@@ -82,6 +82,7 @@ export function analyzeHourlyPattern(klines: Kline[]): HourlyPattern | null {
   }
 
   // 각 날의 9:00 가격을 기준으로 다른 시간대 변화량 계산
+  // 해당날 9시부터 다음날 9시까지의 데이터 포함
   for (const [_dateKey, dayData] of dayGroups.entries()) {
     // 해당 날의 9:00 가격 찾기
     const nineAM = dayData.find(d => d.hour === 9);
@@ -89,11 +90,27 @@ export function analyzeHourlyPattern(klines: Kline[]): HourlyPattern | null {
     
     const basePrice = nineAM.price;
     
-    // 해당 날의 모든 시간대를 9:00 대비로 계산 (9:00 제외)
+    // 해당 날의 9시~23시 데이터를 9:00 대비로 계산
     for (const data of dayData) {
-      if (data.hour >= 0 && data.hour <= 23 && data.hour !== 9) {
+      if (data.hour >= 9 && data.hour <= 23 && data.hour !== 9) {
         const changeFrom9AM = ((data.price - basePrice) / basePrice) * 100;
         hourGroups[data.hour].push(changeFrom9AM);
+      }
+    }
+
+    // 다음날 0시~9시 데이터도 같은 기준으로 계산
+    const nextDayTimestamp = nineAM.timestamp + 24 * 60 * 60;
+    const nextDayKstTime = nextDayTimestamp + 9 * 60 * 60;
+    const nextDayKstDate = new Date(nextDayKstTime * 1000);
+    const nextDateKey = `${nextDayKstDate.getUTCFullYear()}-${String(nextDayKstDate.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDayKstDate.getUTCDate()).padStart(2, '0')}`;
+
+    const nextDayData = dayGroups.get(nextDateKey);
+    if (nextDayData) {
+      for (const data of nextDayData) {
+        if (data.hour >= 0 && data.hour <= 9) {
+          const changeFrom9AM = ((data.price - basePrice) / basePrice) * 100;
+          hourGroups[data.hour].push(changeFrom9AM);
+        }
       }
     }
   }
@@ -291,11 +308,11 @@ export function analyzeDayHourPattern(klines: Kline[]): DayHourPattern | null {
   }
 
   // 요일+시간대별로 9:00 대비 변화량 수집
-  // [요일][시간대] = 변화량 배열
+  // [요일][시간대] = 변화량 배열 (0~24시, 24시는 다음날 9시)
   const dayHourGroups: Record<number, Record<number, number[]>> = {};
   for (let day = 0; day < 7; day++) {
     dayHourGroups[day] = {};
-    for (let hour = 0; hour < 24; hour++) {
+    for (let hour = 0; hour <= 24; hour++) {
       dayHourGroups[day][hour] = [];
     }
   }
@@ -308,11 +325,34 @@ export function analyzeDayHourPattern(klines: Kline[]): DayHourPattern | null {
     const basePrice = nineAM.price;
     const dayOfWeek = nineAM.dayOfWeek;
     
-    // 해당 날의 모든 시간대를 9:00 대비로 계산
+    // 해당 날의 9시~23시 데이터를 9:00 대비로 계산
     for (const data of dayData) {
-      if (data.hour >= 0 && data.hour <= 23) {
+      if (data.hour >= 9 && data.hour <= 23) {
         const changeFrom9AM = ((data.price - basePrice) / basePrice) * 100;
         dayHourGroups[dayOfWeek][data.hour].push(changeFrom9AM);
+      }
+    }
+    
+    // 다음날 0시~9시 데이터도 같은 기준으로 계산
+    // 다음날 날짜 키 생성
+    const nextDayTimestamp = nineAM.timestamp + 24 * 60 * 60; // +1일
+    const nextDayKstTime = nextDayTimestamp + 9 * 60 * 60;
+    const nextDayKstDate = new Date(nextDayKstTime * 1000);
+    const nextYear = nextDayKstDate.getUTCFullYear();
+    const nextMonth = String(nextDayKstDate.getUTCMonth() + 1).padStart(2, '0');
+    const nextDay = String(nextDayKstDate.getUTCDate()).padStart(2, '0');
+    const nextDateKey = `${nextYear}-${nextMonth}-${nextDay}`;
+    
+    // 다음날 데이터 찾기
+    const nextDayData = dayGroups.get(nextDateKey);
+    if (nextDayData) {
+      for (const data of nextDayData) {
+        if (data.hour >= 0 && data.hour <= 9) {
+          // 다음날 9시는 인덱스 24에 저장
+          const targetHour = data.hour === 9 ? 24 : data.hour;
+          const changeFrom9AM = ((data.price - basePrice) / basePrice) * 100;
+          dayHourGroups[dayOfWeek][targetHour].push(changeFrom9AM);
+        }
       }
     }
   }
@@ -323,13 +363,13 @@ export function analyzeDayHourPattern(klines: Kline[]): DayHourPattern | null {
 
   for (let day = 0; day < 7; day++) {
     const hourData: DayHourData[] = [];
-    for (let hour = 0; hour < 24; hour++) {
+    for (let hour = 0; hour <= 24; hour++) {
       const changes = dayHourGroups[day][hour];
       if (changes.length === 0) {
         hourData.push({
           dayOfWeek: day,
           hour,
-          avgChange: hour === 9 ? 0 : 0, // 9:00는 항상 0
+          avgChange: hour === 9 ? 0 : 0, 
           totalCount: 0,
         });
       } else {
@@ -379,7 +419,7 @@ export function analyzeMarketDayHourPattern(
 
   for (let day = 0; day < 7; day++) {
     const hourData: DayHourData[] = [];
-    for (let hour = 0; hour < 24; hour++) {
+    for (let hour = 0; hour <= 24; hour++) {
       // 각 패턴의 data는 이미 재정렬되어 있으므로 (월요일부터), 같은 인덱스로 접근
       const dayHourData = validPatterns
         .map(p => p.pattern!.data[day][hour])
