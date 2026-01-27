@@ -1,4 +1,4 @@
-import type { Kline, TrendAnalysis, SupportResistance, StopLossInfo, Ticker, DivergenceAnalysis, ADXResult, FundingInfo } from '../types';
+import type { Kline, TrendAnalysis, SupportResistance, StopLossInfo, Ticker, ADXResult, FundingInfo, VPVRPOC } from '../types';
 import type { WeeklyPattern, DayKey } from '../utils/weeklyPattern';
 import type { DayHourPattern } from '../utils/hourlyPattern';
 
@@ -28,44 +28,6 @@ export function calculateRSI(prices: number[], period: number = 9): number {
   return rsi;
 }
 
-/**
- * RSI 배열 계산 (전체 기간)
- * 암호화폐 최적화: 기본 period를 9로 변경
- */
-export function calculateRSIArray(prices: number[], period: number = 9): number[] {
-  if (prices.length < period + 1) {
-    return prices.map(() => 50.0);
-  }
-  
-  const rsiArray: number[] = [];
-  const deltas = prices.slice(1).map((price, i) => price - prices[i]);
-  const gains = deltas.map(d => d > 0 ? d : 0);
-  const losses = deltas.map(d => d < 0 ? -d : 0);
-  
-  // 초기 period개는 계산 불가하므로 중립값
-  for (let i = 0; i < period; i++) {
-    rsiArray.push(50.0);
-  }
-  
-  // 나머지 기간에 대해 RSI 계산
-  for (let i = period; i < prices.length; i++) {
-    const periodGains = gains.slice(i - period, i);
-    const periodLosses = losses.slice(i - period, i);
-    
-    const avgGain = periodGains.reduce((a, b) => a + b, 0) / period;
-    const avgLoss = periodLosses.reduce((a, b) => a + b, 0) / period;
-    
-    if (avgLoss === 0) {
-      rsiArray.push(100.0);
-    } else {
-      const rs = avgGain / avgLoss;
-      const rsi = 100 - (100 / (1 + rs));
-      rsiArray.push(rsi);
-    }
-  }
-  
-  return rsiArray;
-}
 
 /**
  * ATR (Average True Range) 계산
@@ -149,6 +111,52 @@ export function calculateMAWithTime(klines: Kline[], period: number = 200): Arra
       result.push({
         time: Math.floor(klines[i][0] / 1000), // 밀리초를 초로 변환
         value: maValues[i]!
+      });
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * VWMA (Volume Weighted Moving Average) 계산
+ * 거래량 가중 이동평균선
+ * @param klines 캔들 데이터
+ * @param period 이동평균 기간 (기본값: 100)
+ * @returns { time: number, value: number } 배열 (유효한 값만)
+ */
+export function calculateVWMAWithTime(klines: Kline[], period: number = 100): Array<{ time: number; value: number }> {
+  if (!klines || klines.length < period) {
+    return [];
+  }
+
+  const result: Array<{ time: number; value: number }> = [];
+  
+  // 초기 period-1개는 계산 불가
+  for (let i = 0; i < period - 1; i++) {
+    // 빈 배열에 추가하지 않음 (유효한 값만 반환)
+  }
+  
+  // period번째부터 VWMA 계산
+  for (let i = period - 1; i < klines.length; i++) {
+    let priceVolumeSum = 0;
+    let volumeSum = 0;
+    
+    // 최근 period개의 캔들에 대해 계산
+    for (let j = i - period + 1; j <= i; j++) {
+      const close = parseFloat(klines[j][4]);
+      const volume = parseFloat(klines[j][5]);
+      
+      priceVolumeSum += close * volume;
+      volumeSum += volume;
+    }
+    
+    // VWMA = Σ(가격 × 거래량) / Σ(거래량)
+    if (volumeSum > 0) {
+      const vwma = priceVolumeSum / volumeSum;
+      result.push({
+        time: Math.floor(klines[i][0] / 1000), // 밀리초를 초로 변환
+        value: vwma
       });
     }
   }
@@ -344,9 +352,7 @@ export function calculateSupportResistance(
       pivot: 0,
       resistance_strength: 0,
       support_strength: 0,
-      current_price: 0,
-      short_term_resistance: 0,
-      short_term_support: 0
+      current_price: 0
     };
   }
   
@@ -406,18 +412,6 @@ export function calculateSupportResistance(
   } else {
     pivot = currentPrice;
   }
-  
-  // 단기 지지선/저항선 계산 (최근 5-10개 봉 기준)
-  const shortTermPeriod = Math.min(10, klines.length);
-  const shortTermKlines = klines.slice(-shortTermPeriod);
-  const shortTermHighs = shortTermKlines.map(k => parseFloat(k[2]));
-  const shortTermLows = shortTermKlines.map(k => parseFloat(k[3]));
-  
-  // 단기 저항선: 최근 고가의 최대값
-  const shortTermResistance = Math.max(...shortTermHighs);
-  
-  // 단기 지지선: 최근 저가의 최소값
-  const shortTermSupport = Math.min(...shortTermLows);
 
   return {
     resistance,
@@ -425,19 +419,18 @@ export function calculateSupportResistance(
     pivot,
     resistance_strength: resistanceStrength,
     support_strength: supportStrength,
-    current_price: currentPrice,
-    short_term_resistance: shortTermResistance,
-    short_term_support: shortTermSupport
+    current_price: currentPrice
   };
 }
 
 /**
  * 손절가와 목표가 계산
+ * 손절선은 ATR 하이브리드 방식 사용 (저항선 기반 + ATR 기반 중 더 안전한 값 선택)
  */
 export function calculateStopLoss(
   supportResistance: SupportResistance,
   positionType: 'short' | 'long' = 'short',
-  riskPercent: number = 2.0
+  atr: number = 0
 ): StopLossInfo {
   const { current_price, resistance, support } = supportResistance;
   
@@ -447,10 +440,17 @@ export function calculateStopLoss(
   let reward: number;
   
   if (positionType === 'short') {
-    // Short 포지션: 저항선 위에 손절가 설정
-    stopLoss = resistance * (1 + riskPercent / 100);
+    // Short 포지션: ATR 하이브리드 방식으로 손절가 설정
+    // 1. 기존 방식: 저항선 위에 2% 여유
+    const baseStopLoss = resistance * 1.02;
     
-    // 목표가: 지지선 근처
+    // 2. ATR 기반: 현재가 + ATR × 1.5 (변동성 고려)
+    const atrBasedStopLoss = current_price + (atr * 1.5);
+    
+    // 3. 둘 중 더 먼 것을 선택 (더 안전한 쪽)
+    stopLoss = Math.max(baseStopLoss, atrBasedStopLoss);
+    
+    // 목표가: 지지선 근처 (변경 없음)
     targetPrice = support * 1.01; // 지지선 약간 위
     
     // 리스크/리워드 비율 계산
@@ -458,7 +458,15 @@ export function calculateStopLoss(
     reward = current_price - targetPrice;
   } else {
     // Long 포지션 (참고용)
-    stopLoss = support * (1 - riskPercent / 100);
+    // 1. 기존 방식: 지지선 아래에 2% 여유
+    const baseStopLoss = support * 0.98;
+    
+    // 2. ATR 기반: 현재가 - ATR × 1.5
+    const atrBasedStopLoss = current_price - (atr * 1.5);
+    
+    // 3. 둘 중 더 먼 것을 선택 (더 안전한 쪽)
+    stopLoss = Math.min(baseStopLoss, atrBasedStopLoss);
+    
     targetPrice = resistance * 0.99;
     
     risk = current_price - stopLoss;
@@ -484,112 +492,6 @@ export function calculateStopLoss(
   };
 }
 
-/**
- * 하락 다이버전스 분석
- * 가격은 상승하지만 RSI는 하락하는 패턴 감지 (Short에 유리)
- */
-export function analyzeDivergence(klines: Kline[], rsiValues: number[]): DivergenceAnalysis {
-  if (!klines || klines.length < 30 || !rsiValues || rsiValues.length < 30) {
-    return {
-      has_divergence: false,
-      divergence_type: 'none',
-      strength: 0,
-      description: '데이터 부족',
-      divergence_score: 0.5
-    };
-  }
-
-  const highs = klines.map(k => parseFloat(k[2]));
-  
-  // 최근 50개 봉에서 고점 찾기 (피크 감지)
-  const lookbackPeriod = Math.min(50, klines.length);
-  const recentHighs = highs.slice(-lookbackPeriod);
-  const recentRSI = rsiValues.slice(-lookbackPeriod);
-
-  // 고점 찾기 (주변 3개 봉보다 높은 지점)
-  const peaks: Array<{ index: number; price: number; rsi: number }> = [];
-  
-  for (let i = 2; i < recentHighs.length - 2; i++) {
-    const isPeak = 
-      recentHighs[i] > recentHighs[i - 1] &&
-      recentHighs[i] > recentHighs[i - 2] &&
-      recentHighs[i] > recentHighs[i + 1] &&
-      recentHighs[i] > recentHighs[i + 2];
-    
-    if (isPeak) {
-      const actualIndex = klines.length - lookbackPeriod + i;
-      peaks.push({
-        index: actualIndex,
-        price: recentHighs[i],
-        rsi: recentRSI[i]
-      });
-    }
-  }
-
-  // 최소 2개의 고점이 있어야 다이버전스 판단 가능
-  if (peaks.length < 2) {
-    return {
-      has_divergence: false,
-      divergence_type: 'none',
-      strength: 0,
-      description: '고점 부족',
-      divergence_score: 0.5
-    };
-  }
-
-  // 고점에 시간 정보 추가
-  const peaksWithTime: Array<{ time: number; price: number; rsi: number }> = peaks.map(peak => {
-    const kline = klines[peak.index];
-    return {
-      time: Math.floor(kline[0] / 1000), // 밀리초를 초로 변환
-      price: peak.price,
-      rsi: peak.rsi
-    };
-  });
-
-  // 최근 2개 고점 비교
-  const lastPeak = peaks[peaks.length - 1];
-  const prevPeak = peaks[peaks.length - 2];
-
-  const priceChange = ((lastPeak.price - prevPeak.price) / prevPeak.price) * 100;
-  const rsiChange = lastPeak.rsi - prevPeak.rsi;
-
-  // 하락 다이버전스: 가격은 상승하지만 RSI는 하락
-  if (priceChange > 1 && rsiChange < -2) {
-    const strength = Math.min(Math.abs(rsiChange) / 10, 1.0); // RSI 차이가 클수록 강도 높음
-    return {
-      has_divergence: true,
-      divergence_type: 'bearish',
-      strength: strength,
-      description: `하락 다이버전스 감지 (가격 +${priceChange.toFixed(2)}%, RSI ${rsiChange.toFixed(1)})`,
-      divergence_score: 0.5 + (strength * 0.4), // 0.5 ~ 0.9
-      peaks: peaksWithTime.slice(-2) // 최근 2개 고점만 반환
-    };
-  }
-
-  // 상승 다이버전스: 가격은 하락하지만 RSI는 상승 (Short에 불리)
-  if (priceChange < -1 && rsiChange > 2) {
-    const strength = Math.min(rsiChange / 10, 1.0);
-    return {
-      has_divergence: true,
-      divergence_type: 'bullish',
-      strength: strength,
-      description: `상승 다이버전스 감지 (가격 ${priceChange.toFixed(2)}%, RSI +${rsiChange.toFixed(1)})`,
-      divergence_score: 0.5 - (strength * 0.3), // 0.2 ~ 0.5
-      peaks: peaksWithTime.slice(-2) // 최근 2개 고점만 반환
-    };
-  }
-
-  // 다이버전스 없음 - 일치(Convergence) 고점 반환
-  return {
-    has_divergence: false,
-    divergence_type: 'none',
-    strength: 0,
-    description: '일치(Convergence) - 다이버전스 없음',
-    divergence_score: 0.5,
-    convergence_peaks: peaksWithTime.slice(-2) // 일치 고점 정보 반환 (차트 표시용)
-  };
-}
 
 /**
  * 펀딩 주기 계산 (시간 단위)
@@ -739,11 +641,11 @@ export function calculateShortScore(
   fundingDict: Record<string, FundingInfo>,
   klines: Kline[],
   rsi: number,
-  divergenceAnalysis?: DivergenceAnalysis,
   adxResult?: ADXResult,
   atr?: number,
   ma50Data?: Array<{ time: number; value: number }>,
-  ma200Data?: Array<{ time: number; value: number }>
+  ma200Data?: Array<{ time: number; value: number }>,
+  vpvrPOC?: VPVRPOC | null
 ): number {
   // 펀딩비 점수 (0-1, 높을수록 좋음)
   // 시간당 펀딩비를 기준으로 계산하여 펀딩 주기와 무관하게 동일한 펀딩비는 동일한 점수를 받도록 함
@@ -767,14 +669,6 @@ export function calculateShortScore(
   const quoteVolume = parseFloat(ticker.quoteVolume || '0');
   const volumeScore = Math.min(quoteVolume / 10_000_000_000, 1.0);
   
-  // 다이버전스 점수 (0-1, 하락 다이버전스일수록 높음)
-  // ADX 필터 적용: ADX > 25일 때만 신뢰 (강한 트렌드에서만 다이버전스 신호 사용)
-  let divergenceScore = divergenceAnalysis?.divergence_score ?? 0.5;
-  if (adxResult && adxResult.adx < 25) {
-    // 약한 트렌드에서는 다이버전스 신뢰도 감소
-    divergenceScore = divergenceScore * 0.6;
-  }
-  
   // ADX 트렌드 점수 (0-1, 하락 트렌드이고 강할수록 높음)
   let adxScore = 0.5;
   if (adxResult) {
@@ -793,41 +687,24 @@ export function calculateShortScore(
     }
   }
   
-  // ATR 리스크 점수 (0-1, 변동성이 적을수록 높음 - 리스크 관리 관점)
-  // 변동성이 너무 높으면 리스크가 크므로 점수 감소
-  let atrScore = 0.5;
-  if (atr && klines.length > 0) {
-    const currentPrice = parseFloat(klines[klines.length - 1][4]);
-    const atrPercent = (atr / currentPrice) * 100;
-    // ATR이 현재가의 2% 이하면 좋음, 5% 이상이면 리스크 큼
-    if (atrPercent <= 2) {
-      atrScore = 1.0;
-    } else if (atrPercent <= 3) {
-      atrScore = 0.8;
-    } else if (atrPercent <= 4) {
-      atrScore = 0.6;
-    } else if (atrPercent <= 5) {
-      atrScore = 0.4;
-    } else {
-      atrScore = 0.2; // 변동성 너무 높음
-    }
-  }
-  
   // 이동평균선 점수 (0-1, 하락 추세일수록 높음)
   const currentPrice = klines.length > 0 ? parseFloat(klines[klines.length - 1][4]) : parseFloat(ticker.lastPrice);
   const maScore = calculateMAScore(currentPrice, ma50Data, ma200Data);
   
-  // 가중 평균 계산 (이동평균선 점수 추가, 비중 재조정)
-  // 이동평균선 점수 15%로 증가: ADX 트렌드: 15%, RSI: 15%, 펀딩비: 14%, 이동평균선: 15%, 다이버전스: 6%, 거래량: 5%, ATR: 5%
+  // VPVR POC 점수 (0-1, 현재가가 POC보다 낮을수록 높음)
+  const vpvrScore = calculateVPVRScore(currentPrice, vpvrPOC);
+  
+  // 가중 평균 계산 (ATR 점수 제거, 비중 재조정)
+  // VPVR POC: 11%, ADX 트렌드: 15%, RSI: 15%, 펀딩비: 14%, 이동평균선: 15%, 거래량: 5%
   // 나머지 25%는 타이밍 점수로 사용
+  // ATR은 손절선 계산에만 사용 (점수 계산에서는 제외)
   const totalScore = (
+    vpvrScore * 0.11 +
     adxScore * 0.15 +
     rsiScore * 0.15 +
     fundingScore * 0.14 +
     maScore * 0.15 +
-    divergenceScore * 0.06 +
-    volumeScore * 0.05 +
-    atrScore * 0.05
+    volumeScore * 0.05
   );
   
   return totalScore * 100;
@@ -902,4 +779,186 @@ export function getFundingSymbol(fundingRate: number): string {
   } else {
     return '[중립]';
   }
+}
+
+/**
+ * VPVR POC 기반 점수 계산 (0-1, 높을수록 Short에 유리)
+ * 
+ * 판단 기준:
+ * 1. 현재가 < POC: 약세, Short에 유리
+ * 2. 현재가 > POC: 강세, Short에 불리
+ * 3. 차이가 클수록 더 강한 신호
+ * 
+ * @param currentPrice 현재가
+ * @param vpvrPOC VPVR POC 데이터
+ * @returns 0-1 점수 (높을수록 Short에 유리)
+ */
+export function calculateVPVRScore(
+  currentPrice: number,
+  vpvrPOC: VPVRPOC | null | undefined
+): number {
+  // VPVR POC 데이터가 없으면 중립 점수 반환
+  if (!vpvrPOC || !vpvrPOC.poc || isNaN(vpvrPOC.poc) || !isFinite(vpvrPOC.poc)) {
+    return 0.5;
+  }
+
+  const poc = vpvrPOC.poc;
+  
+  // 현재가와 POC의 차이를 퍼센트로 계산
+  const priceDiffPercent = ((currentPrice - poc) / poc) * 100;
+
+  // 현재가가 POC보다 낮으면 Short에 유리 (약세)
+  if (priceDiffPercent < 0) {
+    // 차이가 클수록 더 유리
+    // -5% 이상 차이: 매우 유리 (0.9)
+    // -3% ~ -5%: 유리 (0.75)
+    // -1% ~ -3%: 약간 유리 (0.6)
+    // -1% 미만: 중립 (0.5)
+    if (priceDiffPercent <= -5) {
+      return 0.9;
+    } else if (priceDiffPercent <= -3) {
+      return 0.75;
+    } else if (priceDiffPercent <= -1) {
+      return 0.6;
+    } else {
+      return 0.5;
+    }
+  } 
+  // 현재가가 POC보다 높으면 Short에 불리 (강세)
+  else {
+    // 차이가 클수록 더 불리
+    // +5% 이상 차이: 매우 불리 (0.1)
+    // +3% ~ +5%: 불리 (0.25)
+    // +1% ~ +3%: 약간 불리 (0.4)
+    // +1% 미만: 중립 (0.5)
+    if (priceDiffPercent >= 5) {
+      return 0.1;
+    } else if (priceDiffPercent >= 3) {
+      return 0.25;
+    } else if (priceDiffPercent >= 1) {
+      return 0.4;
+    } else {
+      return 0.5;
+    }
+  }
+}
+
+/**
+ * VPVR POC (Volume Profile Visible Range - Point of Control) 계산
+ * 화면에 보이는 범위의 캔들 데이터를 기반으로 가격대별 거래량을 분석하여
+ * 가장 거래량이 많은 가격대(POC)를 계산합니다.
+ * 
+ * @param klines 캔들 데이터 배열
+ * @param bins 가격대 개수 (기본값: 50)
+ * @returns VPVRPOC 객체 (POC 가격, Value Area 등)
+ */
+export function calculateVPVRPOC(klines: Kline[], bins: number = 50): VPVRPOC | null {
+  if (!klines || klines.length === 0) {
+    return null;
+  }
+
+  // 가격 범위 계산
+  let minPrice = Infinity;
+  let maxPrice = -Infinity;
+  let totalVolume = 0;
+
+  for (const kline of klines) {
+    const high = parseFloat(kline[2]);
+    const low = parseFloat(kline[3]);
+    const volume = parseFloat(kline[5]);
+
+    if (isNaN(high) || isNaN(low) || isNaN(volume)) continue;
+
+    minPrice = Math.min(minPrice, low);
+    maxPrice = Math.max(maxPrice, high);
+    totalVolume += volume;
+  }
+
+  if (minPrice >= maxPrice || totalVolume === 0) {
+    return null;
+  }
+
+  // 가격대(bin) 크기 계산
+  const priceRange = maxPrice - minPrice;
+  const binSize = priceRange / bins;
+
+  // 각 가격대별 거래량 집계
+  const volumeProfile: Array<{ price: number; volume: number }> = [];
+
+  for (let i = 0; i < bins; i++) {
+    const binLow = minPrice + (i * binSize);
+    const binHigh = minPrice + ((i + 1) * binSize);
+    const binPrice = (binLow + binHigh) / 2; // 가격대 중간값
+    let binVolume = 0;
+
+    // 각 캔들의 거래량을 가격대에 분배
+    for (const kline of klines) {
+      const high = parseFloat(kline[2]);
+      const low = parseFloat(kline[3]);
+      const volume = parseFloat(kline[5]);
+
+      if (isNaN(high) || isNaN(low) || isNaN(volume)) continue;
+
+      // 캔들이 이 가격대와 겹치는지 확인
+      if (high >= binLow && low <= binHigh) {
+        // 겹치는 비율 계산
+        const overlapLow = Math.max(low, binLow);
+        const overlapHigh = Math.min(high, binHigh);
+        const overlapRange = overlapHigh - overlapLow;
+        const candleRange = high - low;
+
+        if (candleRange > 0) {
+          // 거래량을 겹치는 비율만큼 분배
+          const volumeRatio = overlapRange / candleRange;
+          binVolume += volume * volumeRatio;
+        } else {
+          // 캔들 범위가 0인 경우 (high === low)
+          if (low >= binLow && low <= binHigh) {
+            binVolume += volume;
+          }
+        }
+      }
+    }
+
+    volumeProfile.push({
+      price: binPrice,
+      volume: binVolume,
+    });
+  }
+
+  // POC (Point of Control) 찾기 - 가장 거래량이 많은 가격대
+  let maxVolume = 0;
+  let poc = 0;
+
+  for (const bin of volumeProfile) {
+    if (bin.volume > maxVolume) {
+      maxVolume = bin.volume;
+      poc = bin.price;
+    }
+  }
+
+  // Value Area 계산 (상위 70% 거래량이 포함된 가격 범위)
+  // 거래량을 내림차순으로 정렬
+  const sortedProfile = [...volumeProfile].sort((a, b) => b.volume - a.volume);
+  const targetVolume = totalVolume * 0.7; // 70% 거래량
+  let accumulatedVolume = 0;
+  const valueAreaPrices: number[] = [];
+
+  for (const bin of sortedProfile) {
+    accumulatedVolume += bin.volume;
+    valueAreaPrices.push(bin.price);
+    if (accumulatedVolume >= targetVolume) {
+      break;
+    }
+  }
+
+  const valueAreaHigh = Math.max(...valueAreaPrices);
+  const valueAreaLow = Math.min(...valueAreaPrices);
+
+  return {
+    poc,
+    value_area_high: valueAreaHigh,
+    value_area_low: valueAreaLow,
+    total_volume: totalVolume,
+  };
 }

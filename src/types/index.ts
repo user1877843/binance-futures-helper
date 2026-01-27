@@ -37,23 +37,6 @@ export interface TrendAnalysis {
   trend_score: number;
 }
 
-export interface DivergencePeak {
-  time: number; // UTC timestamp in seconds
-  price: number;
-  rsi: number;
-}
-
-export interface DivergenceAnalysis {
-  has_divergence: boolean;
-  divergence_type: 'bearish' | 'bullish' | 'none';
-  strength: number; // 0-1, 다이버전스 강도
-  description: string;
-  divergence_score: number; // 0-1, Short에 유리할수록 높음
-  peaks?: DivergencePeak[]; // 다이버전스 관련 고점들
-  peaks_5m?: DivergencePeak[]; // 5분봉 기준 다이버전스 고점들 (하락 다이버전스만)
-  convergence_peaks?: DivergencePeak[]; // 일치(Convergence) 고점들 - 다이버전스가 아닌 경우
-}
-
 export interface SupportResistance {
   resistance: number;
   support: number;
@@ -61,8 +44,6 @@ export interface SupportResistance {
   resistance_strength: number;
   support_strength: number;
   current_price: number;
-  short_term_resistance: number; // 단기 저항선
-  short_term_support: number; // 단기 지지선
 }
 
 export interface StopLossInfo {
@@ -81,6 +62,13 @@ export interface ADXResult {
   trend_direction: 'up' | 'down' | 'neutral'; // 트렌드 방향
 }
 
+export interface VPVRPOC {
+  poc: number; // Point of Control (가장 거래량이 많은 가격대)
+  value_area_high?: number; // Value Area High (상위 70% 거래량 상한선)
+  value_area_low?: number; // Value Area Low (하위 70% 거래량 하한선)
+  total_volume: number; // 총 거래량
+}
+
 export interface CoinScore {
   symbol: string;
   ticker: Ticker;
@@ -94,9 +82,10 @@ export interface CoinScore {
   trend_analysis: TrendAnalysis;
   support_resistance: SupportResistance;
   stop_loss_info: StopLossInfo;
-  divergence_analysis: DivergenceAnalysis;
   ma50Data?: Array<{ time: number; value: number }>; // MA50 이동평균선 데이터
   ma200Data?: Array<{ time: number; value: number }>; // MA200 이동평균선 데이터
+  vwma100Data?: Array<{ time: number; value: number }>; // VWMA100 거래량 가중 이동평균선 데이터
+  vpvrPOC?: VPVRPOC; // VPVR POC 데이터
 }
 
 export interface TopGainer {

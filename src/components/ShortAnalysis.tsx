@@ -2,12 +2,10 @@ import { useState, useEffect } from 'react';
 import { getTradingSymbols, getTicker24hr, getFundingRates, getCandlestickData } from '../utils/api';
 import {
   calculateRSI,
-  calculateRSIArray,
   calculateShortScore,
   computeTimingScore,
   dayHourDataIndex,
   analyzeChartTrend,
-  analyzeDivergence,
   calculateSupportResistance,
   calculateStopLoss,
   formatVolume,
@@ -16,7 +14,9 @@ import {
   calculateFundingPeriod,
   calculateADX,
   calculateATR,
-  calculateMAWithTime
+  calculateMAWithTime,
+  calculateVWMAWithTime,
+  calculateVPVRPOC
 } from '../utils/analysis';
 import { analyzeWeeklyPattern, analyzeMarketWeeklyPattern, type WeeklyPattern, type DayKey } from '../utils/weeklyPattern';
 import { analyzeDayHourPattern, analyzeMarketDayHourPattern, type DayHourPattern } from '../utils/hourlyPattern';
@@ -104,9 +104,6 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
           // RSI 계산 (암호화폐 최적화: period 9)
           const rsi = calculateRSI(closes, 9);
           
-          // RSI 배열 계산 (다이버전스 분석용)
-          const rsiArray = calculateRSIArray(closes, 9);
-          
           // ADX 계산 (트렌드 강도 측정)
           const adxResult = calculateADX(klines, 14);
           
@@ -116,41 +113,25 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
           // 이동평균선 계산
           const ma50Data = calculateMAWithTime(klines, 50);
           const ma200Data = calculateMAWithTime(klines, 200);
+          
+          // VWMA100 계산 (거래량 가중 이동평균선)
+          const vwma100Data = calculateVWMAWithTime(klines, 100);
 
-          // 다이버전스 분석 (1시간봉)
-          const divergenceAnalysis = analyzeDivergence(klines, rsiArray);
+          // VPVR POC 계산 (화면에 보이는 범위의 거래량 프로파일)
+          const vpvrPOC = calculateVPVRPOC(klines, 50);
 
-          // 하락 다이버전스인 경우 5분봉도 분석
-          if (divergenceAnalysis.divergence_type === 'bearish' || !divergenceAnalysis.has_divergence) {
-            try {
-              const klines5m = await getCandlestickData(ticker.symbol, '5m', 500);
-              if (klines5m && klines5m.length >= 14) {
-                const closes5m = klines5m.map(k => parseFloat(k[4]));
-                const rsiArray5m = calculateRSIArray(closes5m, 14);
-                const divergenceAnalysis5m = analyzeDivergence(klines5m, rsiArray5m);
-                
-                // 5분봉에서 하락 다이버전스가 감지되면 peaks_5m에 추가
-                if (divergenceAnalysis5m.divergence_type === 'bearish' && divergenceAnalysis5m.peaks) {
-                  divergenceAnalysis.peaks_5m = divergenceAnalysis5m.peaks;
-                }
-              }
-            } catch (err) {
-              console.error(`5분봉 다이버전스 분석 실패 ${ticker.symbol}:`, err);
-            }
-          }
-
-          // Short 점수 계산 (ADX, ATR, 이동평균선 추가)
+          // Short 점수 계산 (ADX, ATR, 이동평균선, VPVR POC 추가)
           const shortScore = calculateShortScore(
             ticker.symbol,
             ticker,
             fundingDict,
             klines,
             rsi,
-            divergenceAnalysis,
             adxResult,
             atr,
             ma50Data,
-            ma200Data
+            ma200Data,
+            vpvrPOC
           );
 
           // 차트 트렌드 분석
@@ -159,8 +140,8 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
           // 저항선/지지선 계산
           const supportResistance = calculateSupportResistance(klines, 20);
 
-          // 손절가/목표가 계산
-          const stopLossInfo = calculateStopLoss(supportResistance, 'short', 2.0);
+          // 손절가/목표가 계산 (ATR 하이브리드 방식)
+          const stopLossInfo = calculateStopLoss(supportResistance, 'short', atr);
 
           // 펀딩비 정보 계산
           const fundingInfo = fundingDict[ticker.symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
@@ -185,9 +166,10 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
             trend_analysis: trendAnalysis,
             support_resistance: supportResistance,
             stop_loss_info: stopLossInfo,
-            divergence_analysis: divergenceAnalysis,
             ma50Data: ma50Data,
-            ma200Data: ma200Data
+            ma200Data: ma200Data,
+            vwma100Data: vwma100Data,
+            vpvrPOC: vpvrPOC || undefined
           });
         } catch (err) {
           console.error(`Error processing ${ticker.symbol}:`, err);
@@ -343,9 +325,6 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
       // RSI 계산 (암호화폐 최적화: period 9)
       const rsi = calculateRSI(closes, 9);
       
-      // RSI 배열 계산 (다이버전스 분석용)
-      const rsiArray = calculateRSIArray(closes, 9);
-      
       // ADX 계산 (트렌드 강도 측정)
       const adxResult = calculateADX(klines, 14);
       
@@ -355,41 +334,25 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
       // 이동평균선 계산
       const ma50Data = calculateMAWithTime(klines, 50);
       const ma200Data = calculateMAWithTime(klines, 200);
+      
+      // VWMA100 계산 (거래량 가중 이동평균선)
+      const vwma100Data = calculateVWMAWithTime(klines, 100);
 
-      // 다이버전스 분석 (1시간봉)
-      const divergenceAnalysis = analyzeDivergence(klines, rsiArray);
+      // VPVR POC 계산 (화면에 보이는 범위의 거래량 프로파일)
+      const vpvrPOC = calculateVPVRPOC(klines, 50);
 
-      // 하락 다이버전스인 경우 5분봉도 분석
-      if (divergenceAnalysis.divergence_type === 'bearish' || !divergenceAnalysis.has_divergence) {
-        try {
-          const klines5m = await getCandlestickData(symbol, '5m', 500);
-          if (klines5m && klines5m.length >= 14) {
-            const closes5m = klines5m.map(k => parseFloat(k[4]));
-            const rsiArray5m = calculateRSIArray(closes5m, 14);
-            const divergenceAnalysis5m = analyzeDivergence(klines5m, rsiArray5m);
-            
-            // 5분봉에서 하락 다이버전스가 감지되면 peaks_5m에 추가
-            if (divergenceAnalysis5m.divergence_type === 'bearish' && divergenceAnalysis5m.peaks) {
-              divergenceAnalysis.peaks_5m = divergenceAnalysis5m.peaks;
-            }
-          }
-        } catch (err) {
-          console.error(`5분봉 다이버전스 분석 실패 ${symbol}:`, err);
-        }
-      }
-
-      // Short 점수 계산 (ADX, ATR, 이동평균선 추가)
+      // Short 점수 계산 (ADX, ATR, 이동평균선, VPVR POC 추가)
       const shortScore = calculateShortScore(
         symbol,
         ticker,
         fundingDict,
         klines,
         rsi,
-        divergenceAnalysis,
         adxResult,
         atr,
         ma50Data,
-        ma200Data
+        ma200Data,
+        vpvrPOC
       );
 
       // 차트 트렌드 분석
@@ -398,8 +361,8 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
       // 저항선/지지선 계산
       const supportResistance = calculateSupportResistance(klines, 20);
 
-      // 손절가/목표가 계산
-      const stopLossInfo = calculateStopLoss(supportResistance, 'short', 2.0);
+      // 손절가/목표가 계산 (ATR 하이브리드 방식)
+      const stopLossInfo = calculateStopLoss(supportResistance, 'short', atr);
 
       // 펀딩비 정보 계산
       const fundingInfo = fundingDict[symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
@@ -424,9 +387,10 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
         trend_analysis: trendAnalysis,
         support_resistance: supportResistance,
         stop_loss_info: stopLossInfo,
-        divergence_analysis: divergenceAnalysis,
         ma50Data: ma50Data,
-        ma200Data: ma200Data
+        ma200Data: ma200Data,
+        vwma100Data: vwma100Data,
+        vpvrPOC: vpvrPOC || undefined
       };
     } catch (err) {
       throw err;
@@ -783,10 +747,11 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                   height={400}
                   supportResistance={searchResult.support_resistance}
                   stopLossInfo={searchResult.stop_loss_info}
-                  divergenceAnalysis={searchResult.divergence_analysis}
                   adxResult={searchResult.adx}
                   ma50Data={searchResult.ma50Data}
                   ma200Data={searchResult.ma200Data}
+                  vwma100Data={searchResult.vwma100Data}
+                  vpvrPOC={searchResult.vpvrPOC}
                 />
               </div>
             )}
@@ -835,16 +800,6 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                     </span>
                   </div>
                   <div className="detail-item">
-                    <span className="detail-label">다이버전스:</span>
-                    <span className={`detail-value ${
-                      searchResult.divergence_analysis.divergence_type === 'bearish' ? 'bearish-divergence' : 
-                      searchResult.divergence_analysis.divergence_type === 'bullish' ? 'bullish-divergence' : ''
-                    }`}>
-                      {searchResult.divergence_analysis.has_divergence 
-                        ? (searchResult.divergence_analysis.divergence_type === 'bearish' ? '🔻 하락' : '🔺 상승')
-                        : '없음'}
-                      {searchResult.divergence_analysis.has_divergence && ` (강도: ${(searchResult.divergence_analysis.strength * 100).toFixed(0)}%)`}
-                    </span>
                   </div>
                   <div className="detail-item">
                     <span className="detail-label">현재가:</span>
@@ -878,18 +833,6 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                     <span className="detail-label">지지선:</span>
                     <span className="detail-value">
                       ${searchResult.support_resistance.support.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                    </span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">단기 저항선:</span>
-                    <span className="detail-value">
-                      ${searchResult.support_resistance.short_term_resistance.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                    </span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">단기 지지선:</span>
-                    <span className="detail-value">
-                      ${searchResult.support_resistance.short_term_support.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                     </span>
                   </div>
                 </div>
@@ -944,11 +887,10 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
           <li>RSI: 15% (높을수록 과매수, Short에 유리, period 9 최적화)</li>
           <li>이동평균선: 15% (MA50 &lt; MA200일수록 하락 추세, 현재가와의 관계 고려)</li>
           <li>펀딩비: 14% (시간당 펀딩비 기준, 높을수록 Short에 유리)</li>
-          <li>다이버전스: 6% (하락 다이버전스일수록 유리, ADX 필터 적용)</li>
+          <li>VPVR POC: 11% (현재가가 POC보다 낮을수록 Short에 유리)</li>
           <li>거래량: 5% (높을수록 유동성 좋음)</li>
-          <li>ATR 리스크: 5% (변동성이 낮을수록 리스크 적음)</li>
         </ul>
-        <p className="score-note">※ 가격 변동률은 ADX 트렌드와 중복되어 제거되었습니다. 요일별·요일+시간대별 패턴으로 타이밍 점수를 반영합니다. (총합: 100%)</p>
+        <p className="score-note">※ 가격 변동률은 ADX 트렌드와 중복되어 제거되었습니다. 요일별·요일+시간대별 패턴으로 타이밍 점수를 반영합니다. ATR은 손절선 계산에만 사용되며 점수 계산에서는 제외됩니다. (총합: 100%)</p>
       </div>
 
       {marketWeeklyPattern && (
@@ -1116,10 +1058,11 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                     height={400}
                     supportResistance={coin.support_resistance}
                     stopLossInfo={coin.stop_loss_info}
-                    divergenceAnalysis={coin.divergence_analysis}
                     adxResult={coin.adx}
                     ma50Data={coin.ma50Data}
                     ma200Data={coin.ma200Data}
+                    vwma100Data={coin.vwma100Data}
+                    vpvrPOC={coin.vpvrPOC}
                   />
                 </div>
               )}
@@ -1168,16 +1111,6 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                       </span>
                     </div>
                     <div className="detail-item">
-                      <span className="detail-label">다이버전스:</span>
-                      <span className={`detail-value ${
-                        coin.divergence_analysis.divergence_type === 'bearish' ? 'bearish-divergence' : 
-                        coin.divergence_analysis.divergence_type === 'bullish' ? 'bullish-divergence' : ''
-                      }`}>
-                        {coin.divergence_analysis.has_divergence 
-                          ? (coin.divergence_analysis.divergence_type === 'bearish' ? '🔻 하락' : '🔺 상승')
-                          : '없음'}
-                        {coin.divergence_analysis.has_divergence && ` (강도: ${(coin.divergence_analysis.strength * 100).toFixed(0)}%)`}
-                      </span>
                     </div>
                     <div className="detail-item">
                       <span className="detail-label">현재가:</span>
@@ -1211,18 +1144,6 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                       <span className="detail-label">지지선:</span>
                       <span className="detail-value">
                         ${coin.support_resistance.support.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                      </span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">단기 저항선:</span>
-                      <span className="detail-value">
-                        ${coin.support_resistance.short_term_resistance.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                      </span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">단기 지지선:</span>
-                      <span className="detail-value">
-                        ${coin.support_resistance.short_term_support.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                       </span>
                     </div>
                   </div>

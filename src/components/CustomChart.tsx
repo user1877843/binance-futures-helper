@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries } from 'lightweight-charts';
 import { getCandlestickData } from '../utils/api';
-import type { Kline, SupportResistance, StopLossInfo, DivergenceAnalysis, ADXResult } from '../types';
+import type { Kline, SupportResistance, StopLossInfo, ADXResult, VPVRPOC } from '../types';
 import './CustomChart.css';
 
 // 타입 정의
@@ -97,10 +97,11 @@ interface CustomChartProps {
   width?: string;
   supportResistance?: SupportResistance;
   stopLossInfo?: StopLossInfo;
-  divergenceAnalysis?: DivergenceAnalysis;
   adxResult?: ADXResult;
   ma200Data?: Array<{ time: number; value: number }>; // MA200 데이터
   ma50Data?: Array<{ time: number; value: number }>; // MA50 데이터
+  vwma100Data?: Array<{ time: number; value: number }>; // VWMA100 데이터
+  vpvrPOC?: VPVRPOC; // VPVR POC 데이터
 }
 
 export function CustomChart({ 
@@ -109,10 +110,11 @@ export function CustomChart({
   width = '100%',
   supportResistance,
   stopLossInfo,
-  divergenceAnalysis,
   adxResult,
   ma200Data,
-  ma50Data
+  ma50Data,
+  vwma100Data,
+  vpvrPOC
 }: CustomChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
@@ -363,7 +365,7 @@ export function CustomChart({
         const resistanceLine = chartRef.current.addSeries(LineSeries, {
           color: '#ff6b6b',
           lineWidth: 2,
-          lineStyle: 2,
+          lineStyle: 0, // 실선
           title: '저항선',
           priceLineVisible: true,
           lastValueVisible: true,
@@ -398,7 +400,7 @@ export function CustomChart({
         const supportLine = chartRef.current.addSeries(LineSeries, {
           color: '#4ecdc4',
           lineWidth: 2,
-          lineStyle: 2,
+          lineStyle: 0, // 실선
           title: '지지선',
           priceLineVisible: true,
           lastValueVisible: true,
@@ -428,82 +430,12 @@ export function CustomChart({
         }
       }
 
-      // 단기 저항선 추가
-      if (supportResistance && typeof supportResistance.short_term_resistance === 'number' && !isNaN(supportResistance.short_term_resistance) && isFinite(supportResistance.short_term_resistance)) {
-        const shortTermResistanceLine = chartRef.current.addSeries(LineSeries, {
-          color: '#ff9999',
-          lineWidth: 1,
-          lineStyle: 1, // 점선
-          title: '단기 저항선',
-          priceLineVisible: true,
-          lastValueVisible: true,
-        });
-
-        const shortTermResistanceData: LineData[] = candlestickData
-          .filter(candle => candle && typeof candle.time === 'number' && !isNaN(candle.time))
-          .map(candle => ({
-            time: candle.time as Time,
-            value: supportResistance.short_term_resistance,
-          }));
-
-        if (shortTermResistanceData.length > 0) {
-          try {
-            shortTermResistanceLine.setData(shortTermResistanceData as any);
-            lineSeriesRefs.current.push(shortTermResistanceLine);
-          } catch (e) {
-            console.error('단기 저항선 setData 에러:', e);
-            try {
-              chartRef.current.removeSeries(shortTermResistanceLine);
-            } catch (removeError) {
-              // 무시
-            }
-          }
-        } else {
-          chartRef.current.removeSeries(shortTermResistanceLine);
-        }
-      }
-
-      // 단기 지지선 추가
-      if (supportResistance && typeof supportResistance.short_term_support === 'number' && !isNaN(supportResistance.short_term_support) && isFinite(supportResistance.short_term_support)) {
-        const shortTermSupportLine = chartRef.current.addSeries(LineSeries, {
-          color: '#7dd3c0',
-          lineWidth: 1,
-          lineStyle: 1, // 점선
-          title: '단기 지지선',
-          priceLineVisible: true,
-          lastValueVisible: true,
-        });
-
-        const shortTermSupportData: LineData[] = candlestickData
-          .filter(candle => candle && typeof candle.time === 'number' && !isNaN(candle.time))
-          .map(candle => ({
-            time: candle.time as Time,
-            value: supportResistance.short_term_support,
-          }));
-
-        if (shortTermSupportData.length > 0) {
-          try {
-            shortTermSupportLine.setData(shortTermSupportData as any);
-            lineSeriesRefs.current.push(shortTermSupportLine);
-          } catch (e) {
-            console.error('단기 지지선 setData 에러:', e);
-            try {
-              chartRef.current.removeSeries(shortTermSupportLine);
-            } catch (removeError) {
-              // 무시
-            }
-          }
-        } else {
-          chartRef.current.removeSeries(shortTermSupportLine);
-        }
-      }
-
       // 손절선 추가
       if (stopLossInfo && typeof stopLossInfo.stop_loss === 'number' && !isNaN(stopLossInfo.stop_loss) && isFinite(stopLossInfo.stop_loss)) {
         const stopLossLine = chartRef.current.addSeries(LineSeries, {
           color: '#ff4757',
           lineWidth: 2,
-          lineStyle: 0,
+          lineStyle: 1, // 점선
           title: '손절선',
           priceLineVisible: true,
           lastValueVisible: true,
@@ -538,7 +470,7 @@ export function CustomChart({
         const targetLine = chartRef.current.addSeries(LineSeries, {
           color: '#2ed573',
           lineWidth: 2,
-          lineStyle: 0,
+          lineStyle: 1, // 점선
           title: '익절선',
           priceLineVisible: true,
           lastValueVisible: true,
@@ -568,105 +500,12 @@ export function CustomChart({
         }
       }
 
-      // 다이버전스 마커 추가 (1시간봉)
-      const chart = chartRef.current;
-      if (divergenceAnalysis && divergenceAnalysis.peaks && divergenceAnalysis.peaks.length > 0 && chart) {
-        const markerColor = divergenceAnalysis.divergence_type === 'bearish' ? '#dc3545' : 
-                           divergenceAnalysis.divergence_type === 'bullish' ? '#28a745' : '#666';
-        
-        // 각 고점에 마커 시리즈 추가 (원형 마커로 표시)
-        divergenceAnalysis.peaks.forEach((peak, index) => {
-          try {
-            // 각 고점에 하나의 데이터 포인트만 있는 마커 시리즈 생성
-            const markerSeries = chart.addSeries(LineSeries, {
-              color: markerColor,
-              lineWidth: 1,
-              pointMarkersVisible: true,
-              pointMarkersRadius: 6,
-              title: index === divergenceAnalysis.peaks!.length - 1 
-                ? (divergenceAnalysis.divergence_type === 'bearish' ? '🔻 하락 다이버전스 (1h)' : 
-                   divergenceAnalysis.divergence_type === 'bullish' ? '🔺 상승 다이버전스' : '다이버전스')
-                : `다이버전스 고점 ${index + 1}`,
-            });
 
-            // 해당 시간에만 데이터 포인트 추가
-            const markerData: LineData[] = [{
-              time: peak.time as Time,
-              value: peak.price
-            }];
-
-            markerSeries.setData(markerData as any);
-            lineSeriesRefs.current.push(markerSeries);
-          } catch (e) {
-            console.error('다이버전스 마커 추가 에러:', e);
-          }
-        });
-      }
-
-      // 일치(Convergence) 마커 추가 (다이버전스가 아닌 경우)
-      if (divergenceAnalysis && divergenceAnalysis.convergence_peaks && divergenceAnalysis.convergence_peaks.length > 0 && chart) {
-        const convergenceColor = '#666'; // 회색
-        
-        // 각 일치 고점에 마커 시리즈 추가 (원형 마커로 표시)
-        divergenceAnalysis.convergence_peaks.forEach((peak, index) => {
-          try {
-            const markerSeries = chart.addSeries(LineSeries, {
-              color: convergenceColor,
-              lineWidth: 1,
-              pointMarkersVisible: true,
-              pointMarkersRadius: 6,
-              title: index === divergenceAnalysis.convergence_peaks!.length - 1 
-                ? '일치(Convergence) 고점'
-                : `일치 고점 ${index + 1}`,
-            });
-
-            const markerData: LineData[] = [{
-              time: peak.time as Time,
-              value: peak.price
-            }];
-
-            markerSeries.setData(markerData as any);
-            lineSeriesRefs.current.push(markerSeries);
-          } catch (e) {
-            console.error('일치 마커 추가 에러:', e);
-          }
-        });
-      }
-
-      // 5분봉 하락 다이버전스 마커 추가
-      if (divergenceAnalysis && divergenceAnalysis.peaks_5m && divergenceAnalysis.peaks_5m.length > 0 && chart) {
-        // 5분봉 하락 다이버전스는 다른 색상으로 표시 (더 진한 빨간색)
-        const markerColor5m = '#b91c1c';
-        
-        divergenceAnalysis.peaks_5m.forEach((peak, index) => {
-          try {
-            const markerSeries5m = chart.addSeries(LineSeries, {
-              color: markerColor5m,
-              lineWidth: 1,
-              pointMarkersVisible: true,
-              pointMarkersRadius: 5,
-              title: index === divergenceAnalysis.peaks_5m!.length - 1 
-                ? '🔻 하락 다이버전스 (5m)'
-                : `다이버전스 고점 5m ${index + 1}`,
-            });
-
-            const markerData5m: LineData[] = [{
-              time: peak.time as Time,
-              value: peak.price
-            }];
-
-            markerSeries5m.setData(markerData5m as any);
-            lineSeriesRefs.current.push(markerSeries5m);
-          } catch (e) {
-            console.error('5분봉 다이버전스 마커 추가 에러:', e);
-          }
-        });
-      }
 
       // 이동평균선(MA50) 추가
       if (ma50Data && ma50Data.length > 0) {
         const ma50Line = chartRef.current.addSeries(LineSeries, {
-          color: '#f39c12', // 주황색
+          color: '#ffd700', // 노란색
           lineWidth: 2,
           lineStyle: 0, // 실선
           title: 'MA50',
@@ -702,7 +541,7 @@ export function CustomChart({
       // 이동평균선(MA200) 추가
       if (ma200Data && ma200Data.length > 0) {
         const ma200Line = chartRef.current.addSeries(LineSeries, {
-          color: '#9b59b6', // 보라색
+          color: '#ff9800', // 주황색
           lineWidth: 2,
           lineStyle: 0, // 실선
           title: 'MA200',
@@ -732,6 +571,77 @@ export function CustomChart({
           }
         } else {
           chartRef.current.removeSeries(ma200Line);
+        }
+      }
+
+      // VWMA100 (거래량 가중 이동평균선) 추가
+      if (vwma100Data && vwma100Data.length > 0) {
+        const vwma100Line = chartRef.current.addSeries(LineSeries, {
+          color: '#000000', // 검은색
+          lineWidth: 2,
+          lineStyle: 0, // 실선
+          title: 'VWMA100',
+          priceLineVisible: true,
+          lastValueVisible: true,
+        });
+
+        const vwma100LineData: LineData[] = vwma100Data
+          .filter(item => item && typeof item.time === 'number' && !isNaN(item.time) && 
+                         typeof item.value === 'number' && !isNaN(item.value) && isFinite(item.value))
+          .map(item => ({
+            time: item.time as Time,
+            value: item.value,
+          }));
+
+        if (vwma100LineData.length > 0) {
+          try {
+            vwma100Line.setData(vwma100LineData as any);
+            lineSeriesRefs.current.push(vwma100Line);
+          } catch (e) {
+            console.error('VWMA100 setData 에러:', e);
+            try {
+              chartRef.current.removeSeries(vwma100Line);
+            } catch (removeError) {
+              // 무시
+            }
+          }
+        } else {
+          chartRef.current.removeSeries(vwma100Line);
+        }
+      }
+
+      // VPVR POC 라인 추가
+      if (vpvrPOC && typeof vpvrPOC.poc === 'number' && !isNaN(vpvrPOC.poc) && isFinite(vpvrPOC.poc)) {
+        const pocLine = chartRef.current.addSeries(LineSeries, {
+          color: '#9b59b6', // 보라색
+          lineWidth: 3, // 두께 증가
+          lineStyle: 0, // 실선
+          title: 'VPVR POC',
+          priceLineVisible: true,
+          lastValueVisible: true,
+        });
+
+        const pocData: LineData[] = candlestickData
+          .filter(candle => candle && typeof candle.time === 'number' && !isNaN(candle.time))
+          .map(candle => ({
+            time: candle.time as Time,
+            value: vpvrPOC.poc,
+          }));
+
+        if (pocData.length > 0) {
+          try {
+            pocLine.setData(pocData as any);
+            lineSeriesRefs.current.push(pocLine);
+          } catch (e) {
+            console.error('VPVR POC setData 에러:', e);
+            try {
+              chartRef.current.removeSeries(pocLine);
+            } catch (removeError) {
+              // 무시
+            }
+          }
+        } else {
+          chartRef.current.removeSeries(pocLine);
         }
       }
 
@@ -777,8 +687,8 @@ export function CustomChart({
         
         const currentPriceLine = chartRef.current.addSeries(LineSeries, {
           color: '#5352ed',
-          lineWidth: 2,
-          lineStyle: 0, // 실선
+          lineWidth: 1,
+          lineStyle: 1, // 작은 점선
           title: '현재가',
           priceLineVisible: true,
           lastValueVisible: true,
@@ -1363,14 +1273,26 @@ export function CustomChart({
           </div>
           {ma50Data && ma50Data.length > 0 && (
             <div className="legend-item">
-              <span className="legend-color" style={{ background: '#f39c12' }}></span>
+              <span className="legend-color" style={{ background: '#ffd700' }}></span>
               <span>MA50</span>
             </div>
           )}
           {ma200Data && ma200Data.length > 0 && (
             <div className="legend-item">
-              <span className="legend-color" style={{ background: '#9b59b6' }}></span>
+              <span className="legend-color" style={{ background: '#ff9800' }}></span>
               <span>MA200</span>
+            </div>
+          )}
+          {vwma100Data && vwma100Data.length > 0 && (
+            <div className="legend-item">
+              <span className="legend-color" style={{ background: '#000000' }}></span>
+              <span>VWMA100</span>
+            </div>
+          )}
+          {vpvrPOC && (
+            <div className="legend-item">
+              <span className="legend-color" style={{ background: '#9b59b6' }}></span>
+              <span>VPVR POC</span>
             </div>
           )}
           {adxResult && (
