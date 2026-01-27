@@ -95,6 +95,8 @@ export interface CoinScore {
   support_resistance: SupportResistance;
   stop_loss_info: StopLossInfo;
   divergence_analysis: DivergenceAnalysis;
+  ma50Data?: Array<{ time: number; value: number }>; // MA50 이동평균선 데이터
+  ma200Data?: Array<{ time: number; value: number }>; // MA200 이동평균선 데이터
 }
 
 export interface TopGainer {

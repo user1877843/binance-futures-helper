@@ -15,7 +15,8 @@ import {
   calculateHourlyFundingRate,
   calculateFundingPeriod,
   calculateADX,
-  calculateATR
+  calculateATR,
+  calculateMAWithTime
 } from '../utils/analysis';
 import { analyzeWeeklyPattern, analyzeMarketWeeklyPattern, type WeeklyPattern, type DayKey } from '../utils/weeklyPattern';
 import { analyzeDayHourPattern, analyzeMarketDayHourPattern, type DayHourPattern } from '../utils/hourlyPattern';
@@ -112,6 +113,10 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
           // ATR 계산 (변동성 측정)
           const atr = calculateATR(klines, 14);
 
+          // 이동평균선 계산
+          const ma50Data = calculateMAWithTime(klines, 50);
+          const ma200Data = calculateMAWithTime(klines, 200);
+
           // 다이버전스 분석 (1시간봉)
           const divergenceAnalysis = analyzeDivergence(klines, rsiArray);
 
@@ -134,7 +139,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
             }
           }
 
-          // Short 점수 계산 (ADX, ATR 추가)
+          // Short 점수 계산 (ADX, ATR, 이동평균선 추가)
           const shortScore = calculateShortScore(
             ticker.symbol,
             ticker,
@@ -143,7 +148,9 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
             rsi,
             divergenceAnalysis,
             adxResult,
-            atr
+            atr,
+            ma50Data,
+            ma200Data
           );
 
           // 차트 트렌드 분석
@@ -178,7 +185,9 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
             trend_analysis: trendAnalysis,
             support_resistance: supportResistance,
             stop_loss_info: stopLossInfo,
-            divergence_analysis: divergenceAnalysis
+            divergence_analysis: divergenceAnalysis,
+            ma50Data: ma50Data,
+            ma200Data: ma200Data
           });
         } catch (err) {
           console.error(`Error processing ${ticker.symbol}:`, err);
@@ -343,6 +352,10 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
       // ATR 계산 (변동성 측정)
       const atr = calculateATR(klines, 14);
 
+      // 이동평균선 계산
+      const ma50Data = calculateMAWithTime(klines, 50);
+      const ma200Data = calculateMAWithTime(klines, 200);
+
       // 다이버전스 분석 (1시간봉)
       const divergenceAnalysis = analyzeDivergence(klines, rsiArray);
 
@@ -365,7 +378,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
         }
       }
 
-      // Short 점수 계산 (ADX, ATR 추가)
+      // Short 점수 계산 (ADX, ATR, 이동평균선 추가)
       const shortScore = calculateShortScore(
         symbol,
         ticker,
@@ -374,7 +387,9 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
         rsi,
         divergenceAnalysis,
         adxResult,
-        atr
+        atr,
+        ma50Data,
+        ma200Data
       );
 
       // 차트 트렌드 분석
@@ -409,7 +424,9 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
         trend_analysis: trendAnalysis,
         support_resistance: supportResistance,
         stop_loss_info: stopLossInfo,
-        divergence_analysis: divergenceAnalysis
+        divergence_analysis: divergenceAnalysis,
+        ma50Data: ma50Data,
+        ma200Data: ma200Data
       };
     } catch (err) {
       throw err;
@@ -768,6 +785,8 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                   stopLossInfo={searchResult.stop_loss_info}
                   divergenceAnalysis={searchResult.divergence_analysis}
                   adxResult={searchResult.adx}
+                  ma50Data={searchResult.ma50Data}
+                  ma200Data={searchResult.ma200Data}
                 />
               </div>
             )}
@@ -921,14 +940,15 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
         <h3>점수 계산 기준:</h3>
         <ul>
           <li>요일·시간대 타이밍: 25% (현재 요일·시간대가 Short에 유리할수록 가산)</li>
-          <li>ADX 트렌드: 18% (하락 트렌드이고 강할수록 유리, 횡보장 필터링)</li>
-          <li>RSI: 18% (높을수록 과매수, Short에 유리, period 9 최적화)</li>
-          <li>펀딩비: 17% (시간당 펀딩비 기준, 높을수록 Short에 유리)</li>
-          <li>다이버전스: 8% (하락 다이버전스일수록 유리, ADX 필터 적용)</li>
-          <li>거래량: 7% (높을수록 유동성 좋음)</li>
-          <li>ATR 리스크: 7% (변동성이 낮을수록 리스크 적음)</li>
+          <li>ADX 트렌드: 15% (하락 트렌드이고 강할수록 유리, 횡보장 필터링)</li>
+          <li>RSI: 15% (높을수록 과매수, Short에 유리, period 9 최적화)</li>
+          <li>이동평균선: 15% (MA50 &lt; MA200일수록 하락 추세, 현재가와의 관계 고려)</li>
+          <li>펀딩비: 14% (시간당 펀딩비 기준, 높을수록 Short에 유리)</li>
+          <li>다이버전스: 6% (하락 다이버전스일수록 유리, ADX 필터 적용)</li>
+          <li>거래량: 5% (높을수록 유동성 좋음)</li>
+          <li>ATR 리스크: 5% (변동성이 낮을수록 리스크 적음)</li>
         </ul>
-        <p className="score-note">※ 가격 변동률은 ADX 트렌드와 중복되어 제거되었습니다. 요일별·요일+시간대별 패턴으로 타이밍 점수를 반영합니다.</p>
+        <p className="score-note">※ 가격 변동률은 ADX 트렌드와 중복되어 제거되었습니다. 요일별·요일+시간대별 패턴으로 타이밍 점수를 반영합니다. (총합: 100%)</p>
       </div>
 
       {marketWeeklyPattern && (
@@ -1098,6 +1118,8 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                     stopLossInfo={coin.stop_loss_info}
                     divergenceAnalysis={coin.divergence_analysis}
                     adxResult={coin.adx}
+                    ma50Data={coin.ma50Data}
+                    ma200Data={coin.ma200Data}
                   />
                 </div>
               )}

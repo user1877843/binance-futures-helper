@@ -99,6 +99,8 @@ interface CustomChartProps {
   stopLossInfo?: StopLossInfo;
   divergenceAnalysis?: DivergenceAnalysis;
   adxResult?: ADXResult;
+  ma200Data?: Array<{ time: number; value: number }>; // MA200 데이터
+  ma50Data?: Array<{ time: number; value: number }>; // MA50 데이터
 }
 
 export function CustomChart({ 
@@ -108,7 +110,9 @@ export function CustomChart({
   supportResistance,
   stopLossInfo,
   divergenceAnalysis,
-  adxResult
+  adxResult,
+  ma200Data,
+  ma50Data
 }: CustomChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
@@ -657,6 +661,78 @@ export function CustomChart({
             console.error('5분봉 다이버전스 마커 추가 에러:', e);
           }
         });
+      }
+
+      // 이동평균선(MA50) 추가
+      if (ma50Data && ma50Data.length > 0) {
+        const ma50Line = chartRef.current.addSeries(LineSeries, {
+          color: '#f39c12', // 주황색
+          lineWidth: 2,
+          lineStyle: 0, // 실선
+          title: 'MA50',
+          priceLineVisible: true,
+          lastValueVisible: true,
+        });
+
+        const ma50LineData: LineData[] = ma50Data
+          .filter(item => item && typeof item.time === 'number' && !isNaN(item.time) && 
+                         typeof item.value === 'number' && !isNaN(item.value) && isFinite(item.value))
+          .map(item => ({
+            time: item.time as Time,
+            value: item.value,
+          }));
+
+        if (ma50LineData.length > 0) {
+          try {
+            ma50Line.setData(ma50LineData as any);
+            lineSeriesRefs.current.push(ma50Line);
+          } catch (e) {
+            console.error('MA50 setData 에러:', e);
+            try {
+              chartRef.current.removeSeries(ma50Line);
+            } catch (removeError) {
+              // 무시
+            }
+          }
+        } else {
+          chartRef.current.removeSeries(ma50Line);
+        }
+      }
+
+      // 이동평균선(MA200) 추가
+      if (ma200Data && ma200Data.length > 0) {
+        const ma200Line = chartRef.current.addSeries(LineSeries, {
+          color: '#9b59b6', // 보라색
+          lineWidth: 2,
+          lineStyle: 0, // 실선
+          title: 'MA200',
+          priceLineVisible: true,
+          lastValueVisible: true,
+        });
+
+        const ma200LineData: LineData[] = ma200Data
+          .filter(item => item && typeof item.time === 'number' && !isNaN(item.time) && 
+                         typeof item.value === 'number' && !isNaN(item.value) && isFinite(item.value))
+          .map(item => ({
+            time: item.time as Time,
+            value: item.value,
+          }));
+
+        if (ma200LineData.length > 0) {
+          try {
+            ma200Line.setData(ma200LineData as any);
+            lineSeriesRefs.current.push(ma200Line);
+          } catch (e) {
+            console.error('MA200 setData 에러:', e);
+            try {
+              chartRef.current.removeSeries(ma200Line);
+            } catch (removeError) {
+              // 무시
+            }
+          }
+        } else {
+          chartRef.current.removeSeries(ma200Line);
+        }
       }
 
       // 현재가 라인 추가 (실제 최신 캔들의 close 가격 사용)
@@ -1285,6 +1361,18 @@ export function CustomChart({
             <span className="legend-color" style={{ background: '#5352ed' }}></span>
             <span>현재가</span>
           </div>
+          {ma50Data && ma50Data.length > 0 && (
+            <div className="legend-item">
+              <span className="legend-color" style={{ background: '#f39c12' }}></span>
+              <span>MA50</span>
+            </div>
+          )}
+          {ma200Data && ma200Data.length > 0 && (
+            <div className="legend-item">
+              <span className="legend-color" style={{ background: '#9b59b6' }}></span>
+              <span>MA200</span>
+            </div>
+          )}
           {adxResult && (
             <div className="legend-item adx-info">
               <span className="adx-label">ADX:</span>

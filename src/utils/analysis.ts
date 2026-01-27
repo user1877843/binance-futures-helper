@@ -101,6 +101,62 @@ export function calculateATR(klines: Kline[], period: number = 14): number {
 }
 
 /**
+ * 이동평균선(SMA) 계산
+ * @param prices 종가 배열
+ * @param period 이동평균 기간 (기본값: 200)
+ * @returns 이동평균선 값 배열 (데이터 부족 시 null 반환)
+ */
+export function calculateMA(prices: number[], period: number = 200): (number | null)[] {
+  if (!prices || prices.length < period) {
+    return prices.map(() => null);
+  }
+
+  const maValues: (number | null)[] = [];
+  
+  // 초기 period-1개는 계산 불가
+  for (let i = 0; i < period - 1; i++) {
+    maValues.push(null);
+  }
+  
+  // period번째부터 이동평균 계산
+  for (let i = period - 1; i < prices.length; i++) {
+    const periodPrices = prices.slice(i - period + 1, i + 1);
+    const ma = periodPrices.reduce((sum, price) => sum + price, 0) / period;
+    maValues.push(ma);
+  }
+  
+  return maValues;
+}
+
+/**
+ * 이동평균선 배열을 시간 정보와 함께 반환
+ * @param klines 캔들 데이터
+ * @param period 이동평균 기간 (기본값: 200)
+ * @returns { time: number, value: number } 배열 (유효한 값만)
+ */
+export function calculateMAWithTime(klines: Kline[], period: number = 200): Array<{ time: number; value: number }> {
+  if (!klines || klines.length < period) {
+    return [];
+  }
+
+  const closes = klines.map(k => parseFloat(k[4]));
+  const maValues = calculateMA(closes, period);
+  
+  const result: Array<{ time: number; value: number }> = [];
+  
+  for (let i = 0; i < maValues.length; i++) {
+    if (maValues[i] !== null) {
+      result.push({
+        time: Math.floor(klines[i][0] / 1000), // 밀리초를 초로 변환
+        value: maValues[i]!
+      });
+    }
+  }
+  
+  return result;
+}
+
+/**
  * ADX (Average Directional Index) 계산
  * 트렌드 강도를 측정 (0-100, 높을수록 강한 트렌드)
  */
@@ -594,6 +650,87 @@ export function calculateHourlyFundingRate(
 }
 
 /**
+ * 이동평균선 기반 점수 계산
+ * @param currentPrice 현재가
+ * @param ma50Data MA50 데이터
+ * @param ma200Data MA200 데이터
+ * @returns 0-1 점수 (높을수록 Short에 유리)
+ */
+function calculateMAScore(
+  currentPrice: number,
+  ma50Data?: Array<{ time: number; value: number }>,
+  ma200Data?: Array<{ time: number; value: number }>
+): number {
+  // 데이터가 없으면 중립 점수 반환
+  if (!ma50Data || !ma200Data || ma50Data.length === 0 || ma200Data.length === 0) {
+    return 0.5;
+  }
+
+  // 최신 이동평균선 값 가져오기
+  const latestMA50 = ma50Data[ma50Data.length - 1]?.value;
+  const latestMA200 = ma200Data[ma200Data.length - 1]?.value;
+
+  if (!latestMA50 || !latestMA200 || isNaN(latestMA50) || isNaN(latestMA200)) {
+    return 0.5;
+  }
+
+  let score = 0.5; // 기본 점수
+
+  // 1. 이동평균선 배열 상태 (MA50 < MA200 = 하락 추세)
+  if (latestMA50 < latestMA200) {
+    // 하락 추세: MA50과 MA200의 차이가 클수록 강한 하락 추세
+    const maDiff = ((latestMA200 - latestMA50) / latestMA200) * 100; // 차이를 퍼센트로
+    if (maDiff > 5) {
+      score += 0.2; // 강한 하락 추세
+    } else if (maDiff > 2) {
+      score += 0.15; // 중간 하락 추세
+    } else {
+      score += 0.1; // 약한 하락 추세
+    }
+  } else if (latestMA50 > latestMA200) {
+    // 상승 추세: Short에 불리
+    const maDiff = ((latestMA50 - latestMA200) / latestMA200) * 100;
+    if (maDiff > 5) {
+      score -= 0.2; // 강한 상승 추세
+    } else if (maDiff > 2) {
+      score -= 0.15; // 중간 상승 추세
+    } else {
+      score -= 0.1; // 약한 상승 추세
+    }
+  }
+
+  // 2. 현재가와 이동평균선의 관계
+  if (currentPrice > latestMA50 && latestMA50 > latestMA200) {
+    // 현재가 > MA50 > MA200: 과매수 상태 (Short에 유리)
+    const priceDiff = ((currentPrice - latestMA50) / latestMA50) * 100;
+    if (priceDiff > 5) {
+      score += 0.15; // 강한 과매수
+    } else if (priceDiff > 2) {
+      score += 0.1; // 중간 과매수
+    } else {
+      score += 0.05; // 약한 과매수
+    }
+  } else if (currentPrice < latestMA50 && latestMA50 < latestMA200) {
+    // 현재가 < MA50 < MA200: 하락 추세 (Short에 유리)
+    const priceDiff = ((latestMA50 - currentPrice) / latestMA50) * 100;
+    if (priceDiff > 5) {
+      score += 0.1; // 강한 하락
+    } else if (priceDiff > 2) {
+      score += 0.05; // 중간 하락
+    }
+  } else if (currentPrice < latestMA200 && latestMA50 > latestMA200) {
+    // 현재가 < MA200 < MA50: 상승 추세에서 하락 시작 (약간 유리)
+    score += 0.05;
+  } else if (currentPrice > latestMA200 && latestMA50 < latestMA200) {
+    // 현재가 > MA200 > MA50: 하락 추세에서 반등 (불리)
+    score -= 0.1;
+  }
+
+  // 점수를 0-1 범위로 제한
+  return Math.max(0, Math.min(1, score));
+}
+
+/**
  * Short 적합도 종합 점수 계산
  */
 export function calculateShortScore(
@@ -604,7 +741,9 @@ export function calculateShortScore(
   rsi: number,
   divergenceAnalysis?: DivergenceAnalysis,
   adxResult?: ADXResult,
-  atr?: number
+  atr?: number,
+  ma50Data?: Array<{ time: number; value: number }>,
+  ma200Data?: Array<{ time: number; value: number }>
 ): number {
   // 펀딩비 점수 (0-1, 높을수록 좋음)
   // 시간당 펀딩비를 기준으로 계산하여 펀딩 주기와 무관하게 동일한 펀딩비는 동일한 점수를 받도록 함
@@ -674,16 +813,21 @@ export function calculateShortScore(
     }
   }
   
-  // 가중 평균 계산 (가격 변동률 제거, 비중 재조정)
-  // 가격 변동률(8%) 제거: ADX와 중복되므로 ADX가 더 정교함
-  // 타이밍 25%를 위해 base 점수 비중을 75%로 조정: ADX 트렌드: 18%, RSI: 18%, 펀딩비: 17%, 다이버전스: 8%, 거래량: 7%, ATR: 7%
+  // 이동평균선 점수 (0-1, 하락 추세일수록 높음)
+  const currentPrice = klines.length > 0 ? parseFloat(klines[klines.length - 1][4]) : parseFloat(ticker.lastPrice);
+  const maScore = calculateMAScore(currentPrice, ma50Data, ma200Data);
+  
+  // 가중 평균 계산 (이동평균선 점수 추가, 비중 재조정)
+  // 이동평균선 점수 15%로 증가: ADX 트렌드: 15%, RSI: 15%, 펀딩비: 14%, 이동평균선: 15%, 다이버전스: 6%, 거래량: 5%, ATR: 5%
+  // 나머지 25%는 타이밍 점수로 사용
   const totalScore = (
-    adxScore * 0.18 +
-    rsiScore * 0.18 +
-    fundingScore * 0.17 +
-    divergenceScore * 0.08 +
-    volumeScore * 0.07 +
-    atrScore * 0.07
+    adxScore * 0.15 +
+    rsiScore * 0.15 +
+    fundingScore * 0.14 +
+    maScore * 0.15 +
+    divergenceScore * 0.06 +
+    volumeScore * 0.05 +
+    atrScore * 0.05
   );
   
   return totalScore * 100;
