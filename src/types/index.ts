@@ -12,6 +12,7 @@ export interface Ticker {
 export interface FundingInfo {
   lastFundingRate: number;
   nextFundingTime: number;
+  fundingIntervalHours?: number; // 펀딩 주기 (시간)
 }
 
 export interface Kline {

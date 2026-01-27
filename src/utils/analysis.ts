@@ -1,4 +1,4 @@
-import type { Kline, TrendAnalysis, SupportResistance, StopLossInfo, Ticker, DivergenceAnalysis, ADXResult } from '../types';
+import type { Kline, TrendAnalysis, SupportResistance, StopLossInfo, Ticker, DivergenceAnalysis, ADXResult, FundingInfo } from '../types';
 import type { WeeklyPattern, DayKey } from '../utils/weeklyPattern';
 import type { DayHourPattern } from '../utils/hourlyPattern';
 
@@ -537,36 +537,39 @@ export function analyzeDivergence(klines: Kline[], rsiValues: number[]): Diverge
 
 /**
  * 펀딩 주기 계산 (시간 단위)
- * nextFundingTime을 기반으로 펀딩 주기를 계산합니다.
- * 대부분의 코인은 8시간 주기이지만, 일부는 4시간 주기를 가질 수 있습니다.
+ * fundingIntervalHours가 제공되면 그것을 사용하고,
+ * 없으면 nextFundingTime을 기반으로 펀딩 주기를 추정합니다.
  * 
  * Binance의 펀딩 주기:
  * - 대부분의 코인: 8시간 (00:00, 08:00, 16:00 UTC)
- * - 일부 코인: 4시간 또는 다른 주기
- * 
- * nextFundingTime에서 현재 시간을 빼면 다음 펀딩까지 남은 시간을 알 수 있습니다.
- * 이 시간을 기반으로 펀딩 주기를 추정합니다.
+ * - 일부 코인: 4시간, 1시간 등
  */
-export function calculateFundingPeriod(nextFundingTime: number): number {
+export function calculateFundingPeriod(
+  nextFundingTime: number,
+  fundingIntervalHours?: number
+): number {
+  // API에서 제공하는 정확한 펀딩 주기 정보가 있으면 사용
+  if (fundingIntervalHours && fundingIntervalHours > 0) {
+    return fundingIntervalHours;
+  }
+  
+  // fundingIntervalHours가 없으면 nextFundingTime을 기반으로 추정
   if (!nextFundingTime) {
     return 8; // 기본값: 8시간
   }
   
   const now = Date.now();
   const timeUntilNext = nextFundingTime - now;
-  
-  // 다음 펀딩까지 남은 시간이 0-4시간 사이면 4시간 주기로 간주
-  // 4시간 이상이면 8시간 주기로 간주 (일반적인 경우)
-  // 정확한 주기를 알기 위해서는 이전 펀딩 시간도 필요하지만,
-  // API에서 제공하지 않으므로 추정값을 사용합니다.
   const hoursUntilNext = timeUntilNext / (60 * 60 * 1000);
   
-  if (hoursUntilNext > 0 && hoursUntilNext <= 4) {
-    return 4;
+  // 다음 펀딩까지 남은 시간을 기반으로 주기 추정
+  // 일반적인 주기: 1h, 4h, 8h
+  if (hoursUntilNext > 0 && hoursUntilNext <= 1.5) {
+    return 1; // 1시간 주기
+  } else if (hoursUntilNext > 1.5 && hoursUntilNext <= 4.5) {
+    return 4; // 4시간 주기
   } else {
-    // 8시간 주기가 일반적이지만, 정확한 주기를 모르므로
-    // lastFundingRate가 주어진 경우, 일반적으로 8시간 주기를 가정합니다.
-    return 8;
+    return 8; // 8시간 주기 (기본값)
   }
 }
 
@@ -578,13 +581,14 @@ export function calculateFundingPeriod(nextFundingTime: number): number {
  */
 export function calculateHourlyFundingRate(
   lastFundingRate: number,
-  nextFundingTime: number
+  nextFundingTime: number,
+  fundingIntervalHours?: number
 ): number {
   if (!lastFundingRate) {
     return 0;
   }
   
-  const fundingPeriod = calculateFundingPeriod(nextFundingTime);
+  const fundingPeriod = calculateFundingPeriod(nextFundingTime, fundingIntervalHours);
   // 시간당 펀딩비 = 펀딩비 / 펀딩 주기
   return lastFundingRate / fundingPeriod;
 }
@@ -595,7 +599,7 @@ export function calculateHourlyFundingRate(
 export function calculateShortScore(
   symbol: string,
   ticker: Ticker,
-  fundingDict: Record<string, { lastFundingRate: number; nextFundingTime: number }>,
+  fundingDict: Record<string, FundingInfo>,
   klines: Kline[],
   rsi: number,
   divergenceAnalysis?: DivergenceAnalysis,
@@ -607,7 +611,8 @@ export function calculateShortScore(
   const fundingInfo = fundingDict[symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
   const hourlyFundingRate = calculateHourlyFundingRate(
     fundingInfo.lastFundingRate,
-    fundingInfo.nextFundingTime
+    fundingInfo.nextFundingTime,
+    fundingInfo.fundingIntervalHours
   );
   // 시간당 펀딩비를 퍼센트로 변환 (예: -0.00125 -> -0.125%)
   const hourlyFundingRatePercent = hourlyFundingRate * 100;

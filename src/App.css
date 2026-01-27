@@ -22,6 +22,12 @@
   font-weight: 600;
 }
 
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
 .nav-buttons {
   display: flex;
   gap: 1rem;
@@ -54,6 +60,71 @@
   padding: 2rem 0;
 }
 
+.settings-container {
+  position: relative;
+}
+
+.settings-btn {
+  padding: 0.75rem 1rem;
+  background: #f8f9fa;
+  color: #666;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-btn:hover {
+  background: #e9ecef;
+  color: #333;
+}
+
+.settings-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 250px;
+}
+
+.settings-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.settings-input {
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  width: 80px;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.settings-hint {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.85rem;
+  color: #666;
+}
+
 @media (max-width: 768px) {
   .nav {
     flex-direction: column;
@@ -65,6 +136,12 @@
     font-size: 1.2rem;
   }
 
+  .nav-right {
+    width: 100%;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
   .nav-buttons {
     width: 100%;
     justify-content: center;
@@ -74,5 +151,15 @@
     flex: 1;
     padding: 0.5rem 1rem;
     font-size: 0.9rem;
+  }
+
+  .settings-container {
+    width: 100%;
+  }
+
+  .settings-dropdown {
+    right: auto;
+    left: 0;
+    width: 100%;
   }
 }

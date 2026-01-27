@@ -34,17 +34,41 @@ export async function getTicker24hr(): Promise<Ticker[]> {
  * 펀딩비 데이터 가져오기
  */
 export async function getFundingRates(): Promise<Record<string, FundingInfo>> {
-  const response = await fetch(`${BINANCE_FUTURES_API}/premiumIndex`);
-  if (!response.ok) {
+  const [premiumResponse, fundingInfoResponse] = await Promise.all([
+    fetch(`${BINANCE_FUTURES_API}/premiumIndex`),
+    fetch(`${BINANCE_FUTURES_API}/fundingInfo`)
+  ]);
+  
+  if (!premiumResponse.ok) {
     throw new Error('펀딩비 데이터를 가져오는데 실패했습니다.');
   }
-  const data = await response.json();
+  
+  const premiumData = await premiumResponse.json();
+  
+  // fundingInfo는 실패해도 계속 진행 (선택적)
+  let fundingInfoData: any[] = [];
+  if (fundingInfoResponse.ok) {
+    try {
+      fundingInfoData = await fundingInfoResponse.json();
+    } catch (e) {
+      console.warn('펀딩 주기 정보를 가져오는데 실패했습니다:', e);
+    }
+  }
+  
+  // fundingInfo를 심볼별로 매핑
+  const fundingInfoMap: Record<string, number> = {};
+  fundingInfoData.forEach((item: any) => {
+    if (item.symbol && item.fundingIntervalHours) {
+      fundingInfoMap[item.symbol] = item.fundingIntervalHours;
+    }
+  });
   
   const fundingDict: Record<string, FundingInfo> = {};
-  data.forEach((item: any) => {
+  premiumData.forEach((item: any) => {
     fundingDict[item.symbol] = {
       lastFundingRate: parseFloat(item.lastFundingRate || '0'),
-      nextFundingTime: parseInt(item.nextFundingTime || '0', 10)
+      nextFundingTime: parseInt(item.nextFundingTime || '0', 10),
+      fundingIntervalHours: fundingInfoMap[item.symbol]
     };
   });
   

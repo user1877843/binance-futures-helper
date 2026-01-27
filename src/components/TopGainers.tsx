@@ -5,7 +5,11 @@ import type { TopGainer } from '../types';
 import { CustomChart } from './CustomChart';
 import './TopGainers.css';
 
-export function TopGainers() {
+interface TopGainersProps {
+  maxCoins?: number;
+}
+
+export function TopGainers({ maxCoins = 10 }: TopGainersProps) {
   const [gainers, setGainers] = useState<TopGainer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +44,7 @@ export function TopGainers() {
         )
         .map(ticker => {
           const fundingInfo = fundingDict[ticker.symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
-          const fundingPeriod = calculateFundingPeriod(fundingInfo.nextFundingTime);
+          const fundingPeriod = calculateFundingPeriod(fundingInfo.nextFundingTime, fundingInfo.fundingIntervalHours);
           return {
             symbol: ticker.symbol,
             priceChangePercent: parseFloat(ticker.priceChangePercent),
@@ -56,7 +60,7 @@ export function TopGainers() {
           };
         })
         .sort((a, b) => b.priceChangePercent - a.priceChangePercent)
-        .slice(0, 10);
+        .slice(0, maxCoins);
 
       setGainers(validTickers);
 
@@ -120,7 +124,7 @@ export function TopGainers() {
   return (
     <div className="top-gainers">
       <div className="header">
-        <h1>바이낸스 선물 상승률 상위 10개 코인 분석</h1>
+        <h1>바이낸스 선물 상승률 상위 {maxCoins}개 코인 분석</h1>
         {lastUpdate && (
           <p className="update-time">
             업데이트 시간: {lastUpdate.toLocaleString('ko-KR')}

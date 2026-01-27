@@ -24,7 +24,12 @@ import { CustomChart } from './CustomChart';
 import { DayHourHeatmap } from './DayHourHeatmap';
 import './ShortAnalysis.css';
 
-export function ShortAnalysis() {
+interface ShortAnalysisProps {
+  maxCoins?: number;
+}
+
+export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisProps) {
+  const [maxCoins, setMaxCoins] = useState<number>(initialMaxCoins);
   const [coinScores, setCoinScores] = useState<CoinScore[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,12 +51,18 @@ export function ShortAnalysis() {
     hourAvgChange: number;
     message: string;
   } | null>(null);
+  const [coinCountInput, setCoinCountInput] = useState<string>(initialMaxCoins.toString());
+  const [analysisDays, setAnalysisDays] = useState<number>(60);
+  const [analysisDaysInput, setAnalysisDaysInput] = useState<string>('60');
+  const [showCoinList, setShowCoinList] = useState<boolean>(false);
 
-  const fetchData = async () => {
+  const fetchData = async (coinCount?: number, days?: number) => {
+    const targetCount = coinCount ?? maxCoins;
+    const targetDays = days ?? analysisDays;
     try {
       setLoading(true);
       setError(null);
-      setProgress({ current: 0, total: 10 });
+      setProgress({ current: 0, total: targetCount });
 
       const [tradingSymbols, tickers, fundingDict] = await Promise.all([
         getTradingSymbols(),
@@ -63,14 +74,14 @@ export function ShortAnalysis() {
       const symbolsArray = Array.from(tradingSymbols).sort();
       setAvailableSymbols(symbolsArray);
 
-      // 상승률 상위 10개 코인 필터링
+      // 상승률 상위 코인 필터링
       const validTickers = tickers
         .filter(ticker =>
           tradingSymbols.has(ticker.symbol) &&
           parseFloat(ticker.priceChangePercent) > 0
         )
         .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))
-        .slice(0, 10);
+        .slice(0, targetCount);
 
       const scores: CoinScore[] = [];
 
@@ -147,10 +158,11 @@ export function ShortAnalysis() {
           // 펀딩비 정보 계산
           const fundingInfo = fundingDict[ticker.symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
           const fundingRate = fundingInfo.lastFundingRate * 100;
-          const fundingPeriod = calculateFundingPeriod(fundingInfo.nextFundingTime);
+          const fundingPeriod = calculateFundingPeriod(fundingInfo.nextFundingTime, fundingInfo.fundingIntervalHours);
           const hourlyFundingRate = calculateHourlyFundingRate(
             fundingInfo.lastFundingRate,
-            fundingInfo.nextFundingTime
+            fundingInfo.nextFundingTime,
+            fundingInfo.fundingIntervalHours
           ) * 100; // 퍼센트로 변환
 
           scores.push({
@@ -191,7 +203,7 @@ export function ShortAnalysis() {
       try {
         const weeklyPatternPromises = altcoinsForPattern.map(async (coin) => {
           try {
-            const dailyKlines = await getCandlestickData(coin.symbol, '1d', 60);
+            const dailyKlines = await getCandlestickData(coin.symbol, '1d', targetDays);
             if (dailyKlines && dailyKlines.length >= 7) {
               const pattern = analyzeWeeklyPattern(dailyKlines);
               return { symbol: coin.symbol, pattern };
@@ -210,12 +222,12 @@ export function ShortAnalysis() {
         console.error('요일별 패턴 분석 실패:', err);
       }
 
-      // 요일+시간대별 패턴 분석 (1시간봉 데이터 사용, 60일 = 1440시간)
+      // 요일+시간대별 패턴 분석 (1시간봉 데이터 사용)
       try {
         const dayHourPatternPromises = altcoinsForPattern.map(async (coin) => {
           try {
-            // 60일치 1시간봉 데이터 가져오기 (60일 × 24시간 = 1440개)
-            const hourlyKlines = await getCandlestickData(coin.symbol, '1h', 1440);
+            // 설정된 일수만큼 1시간봉 데이터 가져오기 (일수 × 24시간)
+            const hourlyKlines = await getCandlestickData(coin.symbol, '1h', targetDays * 24);
             if (hourlyKlines && hourlyKlines.length >= 24) {
               const pattern = analyzeDayHourPattern(hourlyKlines);
               return { symbol: coin.symbol, pattern };
@@ -377,10 +389,11 @@ export function ShortAnalysis() {
       // 펀딩비 정보 계산
       const fundingInfo = fundingDict[symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
       const fundingRate = fundingInfo.lastFundingRate * 100;
-      const fundingPeriod = calculateFundingPeriod(fundingInfo.nextFundingTime);
+      const fundingPeriod = calculateFundingPeriod(fundingInfo.nextFundingTime, fundingInfo.fundingIntervalHours);
       const hourlyFundingRate = calculateHourlyFundingRate(
         fundingInfo.lastFundingRate,
-        fundingInfo.nextFundingTime
+        fundingInfo.nextFundingTime,
+        fundingInfo.fundingIntervalHours
       ) * 100; // 퍼센트로 변환
 
       return {
@@ -459,6 +472,34 @@ export function ShortAnalysis() {
     }
   };
 
+  const handleApplyCoinCount = () => {
+    const coinValue = parseInt(coinCountInput, 10);
+    const daysValue = parseInt(analysisDaysInput, 10);
+    
+    let validCoinCount = maxCoins;
+    let validDays = analysisDays;
+    
+    if (!isNaN(coinValue) && coinValue > 0 && coinValue <= 100) {
+      setMaxCoins(coinValue);
+      validCoinCount = coinValue;
+    }
+    
+    if (!isNaN(daysValue) && daysValue >= 7 && daysValue <= 365) {
+      setAnalysisDays(daysValue);
+      validDays = daysValue;
+    }
+    
+    fetchData(validCoinCount, validDays);
+  };
+
+  // props가 변경되면 내부 상태도 업데이트
+  useEffect(() => {
+    setMaxCoins(initialMaxCoins);
+    setCoinCountInput(initialMaxCoins.toString());
+    setAnalysisDays(60);
+    setAnalysisDaysInput('60');
+  }, [initialMaxCoins]);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -470,7 +511,7 @@ export function ShortAnalysis() {
         <p>바이낸스 선물 시장 데이터 수집 중...</p>
         {progress.total > 0 && (
           <p>
-            상위 10개 코인 분석 중... ({progress.current}/{progress.total})
+            상위 {maxCoins}개 코인 분석 중... ({progress.current}/{progress.total})
           </p>
         )}
       </div>
@@ -489,19 +530,136 @@ export function ShortAnalysis() {
   return (
     <div className="short-analysis">
       <div className="header">
-        <h1>Short 적합도 순위 (상위 10개 코인)</h1>
+        <h1>Short 적합도 분석 (상위 {maxCoins}개 코인)</h1>
         <div className="daytrader-mode-info">
           <span className="mode-badge">⭐ 데이트레이더 모드</span>
-          <span className="mode-description">상위 3개 코인은 별도 강조 표시됩니다 (하루 1~2회 매매 추천)</span>
         </div>
         {lastUpdate && (
           <p className="update-time">
             업데이트 시간: {lastUpdate.toLocaleString('ko-KR')}
           </p>
         )}
-        <button onClick={fetchData} className="refresh-btn" disabled={loading}>
-          {loading ? '업데이트 중...' : '새로고침'}
-        </button>
+        <div className="coin-list-section">
+          <div className="coin-list-header">
+            <strong>분석 중인 코인 목록 ({coinScores.length}/{maxCoins}개)</strong>
+          </div>
+          <div className="coin-list-settings">
+            <div className="coin-list-settings-row">
+              <div className="coin-list-settings-top-row">
+                <div className="coin-count-field-wrapper">
+                  <div className="coin-count-field-row">
+                    <div className="coin-count-label-row">
+                      <label className="coin-count-label">
+                        분석 코인 개수:
+                        <div className="coin-count-input-group">
+                          <input
+                            type="text"
+                            value={coinCountInput}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              // 숫자만 입력 가능하도록 필터링
+                              if (value === '' || /^\d+$/.test(value)) {
+                                setCoinCountInput(value);
+                              }
+                            }}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter') {
+                                handleApplyCoinCount();
+                              }
+                            }}
+                            className="coin-count-input"
+                            disabled={loading}
+                            placeholder="1~100"
+                          />
+                          <span>개</span>
+                        </div>
+                      </label>
+                      <span className="coin-count-hint-inline">코인 개수: 1~100</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="coin-count-field-wrapper">
+                  <div className="coin-count-field-row">
+                    <div className="coin-count-label-row">
+                      <label className="coin-count-label">
+                        분석 일수:
+                        <div className="coin-count-input-group">
+                          <input
+                            type="text"
+                            value={analysisDaysInput}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              // 숫자만 입력 가능하도록 필터링
+                              if (value === '' || /^\d+$/.test(value)) {
+                                setAnalysisDaysInput(value);
+                              }
+                            }}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter') {
+                                handleApplyCoinCount();
+                              }
+                            }}
+                            className="coin-count-input"
+                            disabled={loading}
+                            placeholder="7~365"
+                          />
+                          <span>일</span>
+                        </div>
+                      </label>
+                      <span className="coin-count-hint-inline">분석 일수: 7~365</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={handleApplyCoinCount}
+                  className="apply-coin-count-btn"
+                  disabled={
+                    loading || 
+                    !coinCountInput || 
+                    parseInt(coinCountInput, 10) < 1 || 
+                    parseInt(coinCountInput, 10) > 100 ||
+                    !analysisDaysInput ||
+                    parseInt(analysisDaysInput, 10) < 7 ||
+                    parseInt(analysisDaysInput, 10) > 365
+                  }
+                >
+                  {loading ? '분석 중...' : '분석 시작'}
+                </button>
+              </div>
+            </div>
+            {coinScores.length > 0 && (
+              <button
+                onClick={() => setShowCoinList(!showCoinList)}
+                className="toggle-coin-list-btn"
+                title={showCoinList ? '코인 목록 숨기기' : '코인 목록 보기'}
+              >
+                {showCoinList ? '▲ 코인 목록 숨기기' : '▼ 코인 목록 보기'}
+              </button>
+            )}
+          </div>
+          {showCoinList && coinScores.length > 0 && (
+            <div className="coin-list-content">
+              {coinScores.map((coin, idx) => (
+                <div key={coin.symbol} className="coin-list-item">
+                  <span className="coin-rank-badge">#{idx + 1}</span>
+                  <span className="coin-symbol-text">{coin.symbol}</span>
+                  <span className="coin-score-text">
+                    점수: {coin.short_score.toFixed(2)}
+                  </span>
+                  <span className={`coin-change-text ${parseFloat(coin.ticker.priceChangePercent) > 0 ? 'positive' : 'negative'}`}>
+                    {parseFloat(coin.ticker.priceChangePercent) > 0 ? '+' : ''}
+                    {parseFloat(coin.ticker.priceChangePercent).toFixed(2)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {coinScores.length === 0 && !loading && (
+            <div className="coin-list-empty">
+              분석된 코인이 없습니다.
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="search-section">
@@ -775,7 +933,7 @@ export function ShortAnalysis() {
 
       {marketWeeklyPattern && (
         <div className="weekly-pattern-section">
-          <h3>요일별 알트코인 변화량 패턴 (한국시간 기준, 최근 60일 분석)</h3>
+          <h3>요일별 알트코인 변화량 패턴 (한국시간 기준, 최근 {analysisDays}일 분석)</h3>
           <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
             ※ 거래량 TOP10 코인(BTC, ETH, BNB, XRP 등)은 제외하고 계산됩니다.
           </p>
@@ -872,7 +1030,7 @@ export function ShortAnalysis() {
 
       {marketDayHourPattern && (
         <div className="hourly-pattern-section">
-          <h3>요일+시간대별 알트코인 변화량 패턴 (한국시간 9:00 기준, 최근 60일 분석)</h3>
+          <h3>요일+시간대별 알트코인 변화량 패턴 (한국시간 9:00 기준, 최근 {analysisDays}일 분석)</h3>
           <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
             ※ 거래량 TOP10 코인(BTC, ETH, BNB, XRP 등)은 제외하고 계산됩니다.
           </p>
