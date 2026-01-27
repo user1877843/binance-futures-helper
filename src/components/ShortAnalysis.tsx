@@ -621,7 +621,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
     return (
       <div className="error-container">
         <p>오류: {error}</p>
-        <button onClick={fetchData}>다시 시도</button>
+        <button onClick={() => fetchData()}>다시 시도</button>
       </div>
     );
   }
