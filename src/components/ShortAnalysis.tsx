@@ -255,7 +255,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
           const trendAnalysis = analyzeChartTrend(klines);
 
           // 저항선/지지선 계산
-          const supportResistance = calculateSupportResistance(klines, 20);
+          const supportResistance = calculateSupportResistance(klines, 200);
 
           // 손절가/목표가 계산 (ATR 하이브리드 방식)
           const stopLossInfo = calculateStopLoss(supportResistance, 'short', atr);
@@ -477,7 +477,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
       const trendAnalysis = analyzeChartTrend(klines);
 
       // 저항선/지지선 계산
-      const supportResistance = calculateSupportResistance(klines, 20);
+      const supportResistance = calculateSupportResistance(klines, 200);
 
       // 손절가/목표가 계산 (ATR 하이브리드 방식)
       const stopLossInfo = calculateStopLoss(supportResistance, 'short', atr);
