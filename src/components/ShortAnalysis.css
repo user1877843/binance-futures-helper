@@ -715,6 +715,47 @@
   color: #28a745;
 }
 
+/* VPVR POC 관련 스타일 */
+.detail-value.vpvr-very-favorable {
+  color: #28a745;
+  font-weight: 700;
+}
+
+.detail-value.vpvr-favorable {
+  color: #5cb85c;
+  font-weight: 600;
+}
+
+.detail-value.vpvr-slightly-favorable {
+  color: #90ee90;
+}
+
+.detail-value.vpvr-slightly-unfavorable {
+  color: #ffb6c1;
+}
+
+.detail-value.vpvr-unfavorable {
+  color: #dc3545;
+  font-weight: 600;
+}
+
+.detail-value.vpvr-very-unfavorable {
+  color: #c82333;
+  font-weight: 700;
+}
+
+.detail-value.vpvr-confidence-high {
+  color: #28a745;
+}
+
+.detail-value.vpvr-confidence-medium {
+  color: #ffc107;
+}
+
+.detail-value.vpvr-confidence-low {
+  color: #dc3545;
+}
+
 .stop-loss-section {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;

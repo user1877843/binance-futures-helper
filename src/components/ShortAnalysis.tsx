@@ -16,8 +16,10 @@ import {
   calculateATR,
   calculateMAWithTime,
   calculateVWMAWithTime,
-  calculateVPVRPOC
+  calculateVPVRPOC,
+  calculateVPVRScore
 } from '../utils/analysis';
+import type { VPVRPOC } from '../types';
 import { analyzeWeeklyPattern, analyzeMarketWeeklyPattern, type WeeklyPattern, type DayKey } from '../utils/weeklyPattern';
 import { analyzeDayHourPattern, analyzeMarketDayHourPattern, type DayHourPattern } from '../utils/hourlyPattern';
 import type { CoinScore } from '../types';
@@ -27,6 +29,120 @@ import './ShortAnalysis.css';
 
 interface ShortAnalysisProps {
   maxCoins?: number;
+}
+
+/**
+ * VPVR POC 정보를 계산하는 헬퍼 함수
+ */
+function getVPVRInfo(
+  currentPrice: number,
+  vpvrPOC: VPVRPOC | null | undefined,
+  atr?: number
+): {
+  position: string; // "POC 위" / "POC 아래" / "POC 근처"
+  distance: string; // "-3.2%" 또는 "+2.5%"
+  signal: string; // "매우 유리" / "유리" / "약간 유리" / "중립" / "약간 불리" / "불리" / "매우 불리"
+  score: number; // 0-100
+  atrMultiplier: string; // "1.2x ATR" 또는 "-"
+  confidence: string; // "높음" / "보통" / "낮음"
+  positionClass: string; // CSS 클래스용
+  signalClass: string; // CSS 클래스용
+} {
+  if (!vpvrPOC || !vpvrPOC.poc) {
+    return {
+      position: '-',
+      distance: '-',
+      signal: '데이터 없음',
+      score: 50,
+      atrMultiplier: '-',
+      confidence: '-',
+      positionClass: '',
+      signalClass: ''
+    };
+  }
+
+  const poc = vpvrPOC.poc;
+  const priceDiff = currentPrice - poc;
+  const priceDiffPercent = (priceDiff / poc) * 100;
+  const absPriceDiffPercent = Math.abs(priceDiffPercent);
+
+  // 현재가 vs POC 위치
+  let position: string;
+  let distance: string;
+  let positionClass: string;
+
+  if (absPriceDiffPercent < 0.5) {
+    position = 'POC 근처';
+    distance = `${priceDiffPercent >= 0 ? '+' : ''}${priceDiffPercent.toFixed(2)}%`;
+    positionClass = '';
+  } else if (priceDiff < 0) {
+    position = 'POC 아래';
+    distance = `${priceDiffPercent.toFixed(2)}%`;
+    positionClass = '';
+  } else {
+    position = 'POC 위';
+    distance = `+${priceDiffPercent.toFixed(2)}%`;
+    positionClass = '';
+  }
+
+  // ATR 배수 계산
+  let atrMultiplier = '-';
+  if (atr && atr > 0) {
+    const multiplier = Math.abs(priceDiff) / atr;
+    atrMultiplier = `${multiplier.toFixed(2)}x ATR`;
+  }
+
+  // 신뢰도 계산
+  let confidence = '높음';
+  if (atr && atr > 0) {
+    const atrPercent = (atr / currentPrice) * 100;
+    if (atrPercent > 5) {
+      confidence = '낮음';
+    } else if (atrPercent > 3) {
+      confidence = '보통';
+    }
+  }
+
+  // VPVR 점수 계산
+  const score = calculateVPVRScore(currentPrice, vpvrPOC, atr) * 100;
+
+  // VPVR 신호 판단
+  let signal: string;
+  let signalClass: string;
+
+  if (score >= 85) {
+    signal = '매우 유리';
+    signalClass = '';
+  } else if (score >= 70) {
+    signal = '유리';
+    signalClass = '';
+  } else if (score >= 55) {
+    signal = '약간 유리';
+    signalClass = '';
+  } else if (score >= 45) {
+    signal = '중립';
+    signalClass = '';
+  } else if (score >= 30) {
+    signal = '약간 불리';
+    signalClass = '';
+  } else if (score >= 15) {
+    signal = '불리';
+    signalClass = '';
+  } else {
+    signal = '매우 불리';
+    signalClass = '';
+  }
+
+  return {
+    position,
+    distance,
+    signal,
+    score,
+    atrMultiplier,
+    confidence,
+    positionClass,
+    signalClass
+  };
 }
 
 export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisProps) {
@@ -817,6 +933,29 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                     <span className="detail-label">거래량:</span>
                     <span className="detail-value">{formatVolume(parseFloat(searchResult.ticker.quoteVolume))} USDT</span>
                   </div>
+                  {searchResult.vpvrPOC && (() => {
+                    const vpvrInfo = getVPVRInfo(
+                      parseFloat(searchResult.ticker.lastPrice),
+                      searchResult.vpvrPOC,
+                      searchResult.atr
+                    );
+                    return (
+                      <>
+                        <div className="detail-item">
+                          <span className="detail-label">현재가 vs POC:</span>
+                          <span className={`detail-value ${vpvrInfo.positionClass}`}>
+                            {vpvrInfo.position} ({vpvrInfo.distance})
+                          </span>
+                        </div>
+                        <div className="detail-item">
+                          <span className="detail-label">VPVR 신호:</span>
+                          <span className={`detail-value ${vpvrInfo.signalClass}`}>
+                            {vpvrInfo.signal}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -1128,6 +1267,29 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                       <span className="detail-label">거래량:</span>
                       <span className="detail-value">{formatVolume(quoteVolume)} USDT</span>
                     </div>
+                    {coin.vpvrPOC && (() => {
+                      const vpvrInfo = getVPVRInfo(
+                        lastPrice,
+                        coin.vpvrPOC,
+                        coin.atr
+                      );
+                      return (
+                        <>
+                          <div className="detail-item">
+                            <span className="detail-label">현재가 vs POC:</span>
+                            <span className={`detail-value ${vpvrInfo.positionClass}`}>
+                              {vpvrInfo.position} ({vpvrInfo.distance})
+                            </span>
+                          </div>
+                          <div className="detail-item">
+                            <span className="detail-label">VPVR 신호:</span>
+                            <span className={`detail-value ${vpvrInfo.signalClass}`}>
+                              {vpvrInfo.signal}
+                            </span>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
 

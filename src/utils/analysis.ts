@@ -692,7 +692,8 @@ export function calculateShortScore(
   const maScore = calculateMAScore(currentPrice, ma50Data, ma200Data);
   
   // VPVR POC 점수 (0-1, 현재가가 POC보다 낮을수록 높음)
-  const vpvrScore = calculateVPVRScore(currentPrice, vpvrPOC);
+  // ATR을 전달하여 동적 임계값과 신뢰도 조정 적용
+  const vpvrScore = calculateVPVRScore(currentPrice, vpvrPOC, atr);
   
   // 가중 평균 계산 (ATR 점수 제거, 비중 재조정)
   // VPVR POC: 11%, ADX 트렌드: 15%, RSI: 15%, 펀딩비: 14%, 이동평균선: 15%, 거래량: 5%
@@ -789,13 +790,23 @@ export function getFundingSymbol(fundingRate: number): string {
  * 2. 현재가 > POC: 강세, Short에 불리
  * 3. 차이가 클수록 더 강한 신호
  * 
+ * ATR 기반 동적 임계값 적용:
+ * - 고변동성 시장: ATR이 크면 더 큰 거리도 정상 범위로 판단
+ * - 저변동성 시장: ATR이 작으면 작은 거리도 의미 있게 판단
+ * 
+ * 신뢰도 조정:
+ * - 극단적 변동성(ATR > 5%)에서는 신호 신뢰도 감소
+ * - 안정적 시장(ATR < 3%)에서는 신호 신뢰도 유지
+ * 
  * @param currentPrice 현재가
  * @param vpvrPOC VPVR POC 데이터
+ * @param atr ATR (Average True Range) - 변동성 측정
  * @returns 0-1 점수 (높을수록 Short에 유리)
  */
 export function calculateVPVRScore(
   currentPrice: number,
-  vpvrPOC: VPVRPOC | null | undefined
+  vpvrPOC: VPVRPOC | null | undefined,
+  atr?: number
 ): number {
   // VPVR POC 데이터가 없으면 중립 점수 반환
   if (!vpvrPOC || !vpvrPOC.poc || isNaN(vpvrPOC.poc) || !isFinite(vpvrPOC.poc)) {
@@ -803,10 +814,55 @@ export function calculateVPVRScore(
   }
 
   const poc = vpvrPOC.poc;
+  const priceDiff = currentPrice - poc;
+  const priceDiffPercent = (priceDiff / poc) * 100;
   
-  // 현재가와 POC의 차이를 퍼센트로 계산
-  const priceDiffPercent = ((currentPrice - poc) / poc) * 100;
-
+  // ATR이 있으면 동적 임계값 사용
+  if (atr && atr > 0 && !isNaN(atr) && isFinite(atr)) {
+    const atrPercent = (atr / currentPrice) * 100;
+    const atrMultiplier = Math.abs(priceDiff) / atr;
+    
+    // 신뢰도 조정: ATR이 너무 높으면 신뢰도 감소
+    let confidence = 1.0;
+    if (atrPercent > 5) {
+      confidence = 0.7; // 극단적 변동성 - 신뢰도 감소
+    } else if (atrPercent > 3) {
+      confidence = 0.85; // 높은 변동성 - 신뢰도 약간 감소
+    }
+    // ATR이 3% 이하면 신뢰도 1.0 유지
+    
+    // ATR 기반 동적 임계값으로 기본 점수 계산
+    let baseScore = 0.5;
+    
+    if (priceDiff < 0) {
+      // 현재가 < POC (Short에 유리)
+      if (atrMultiplier >= 1.5) {
+        baseScore = 0.9; // ATR × 1.5 이상 차이: 매우 유리
+      } else if (atrMultiplier >= 1.0) {
+        baseScore = 0.75; // ATR × 1.0 ~ 1.5: 유리
+      } else if (atrMultiplier >= 0.5) {
+        baseScore = 0.6; // ATR × 0.5 ~ 1.0: 약간 유리
+      } else {
+        baseScore = 0.5; // ATR × 0.5 미만: 중립
+      }
+    } else {
+      // 현재가 > POC (Short에 불리)
+      if (atrMultiplier >= 1.5) {
+        baseScore = 0.1; // ATR × 1.5 이상 차이: 매우 불리
+      } else if (atrMultiplier >= 1.0) {
+        baseScore = 0.25; // ATR × 1.0 ~ 1.5: 불리
+      } else if (atrMultiplier >= 0.5) {
+        baseScore = 0.4; // ATR × 0.5 ~ 1.0: 약간 불리
+      } else {
+        baseScore = 0.5; // ATR × 0.5 미만: 중립
+      }
+    }
+    
+    // 신뢰도 적용하여 최종 점수 반환
+    return baseScore * confidence;
+  }
+  
+  // ATR이 없으면 기존 방식 사용 (고정 퍼센트 기준)
   // 현재가가 POC보다 낮으면 Short에 유리 (약세)
   if (priceDiffPercent < 0) {
     // 차이가 클수록 더 유리
