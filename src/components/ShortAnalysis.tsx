@@ -648,31 +648,32 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                 <div className="coin-count-field-wrapper">
                   <div className="coin-count-field-row">
                     <div className="coin-count-label-row">
-                      <label className="coin-count-label">
+                      <label htmlFor="coin-count-input" className="coin-count-label">
                         분석 코인 개수:
-                        <div className="coin-count-input-group">
-                          <input
-                            type="text"
-                            value={coinCountInput}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              // 숫자만 입력 가능하도록 필터링
-                              if (value === '' || /^\d+$/.test(value)) {
-                                setCoinCountInput(value);
-                              }
-                            }}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter') {
-                                handleApplyCoinCount();
-                              }
-                            }}
-                            className="coin-count-input"
-                            disabled={loading}
-                            placeholder="1~100"
-                          />
-                          <span>개</span>
-                        </div>
                       </label>
+                      <div className="coin-count-input-group">
+                        <input
+                          id="coin-count-input"
+                          type="text"
+                          value={coinCountInput}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            // 숫자만 입력 가능하도록 필터링
+                            if (value === '' || /^\d+$/.test(value)) {
+                              setCoinCountInput(value);
+                            }
+                          }}
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              handleApplyCoinCount();
+                            }
+                          }}
+                          className="coin-count-input"
+                          disabled={loading}
+                          placeholder="1~100"
+                        />
+                        <span>개</span>
+                      </div>
                       <span className="coin-count-hint-inline">코인 개수: 1~100</span>
                     </div>
                   </div>
@@ -680,31 +681,32 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
                 <div className="coin-count-field-wrapper">
                   <div className="coin-count-field-row">
                     <div className="coin-count-label-row">
-                      <label className="coin-count-label">
+                      <label htmlFor="analysis-days-input" className="coin-count-label">
                         분석 일수:
-                        <div className="coin-count-input-group">
-                          <input
-                            type="text"
-                            value={analysisDaysInput}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              // 숫자만 입력 가능하도록 필터링
-                              if (value === '' || /^\d+$/.test(value)) {
-                                setAnalysisDaysInput(value);
-                              }
-                            }}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter') {
-                                handleApplyCoinCount();
-                              }
-                            }}
-                            className="coin-count-input"
-                            disabled={loading}
-                            placeholder="7~365"
-                          />
-                          <span>일</span>
-                        </div>
                       </label>
+                      <div className="coin-count-input-group">
+                        <input
+                          id="analysis-days-input"
+                          type="text"
+                          value={analysisDaysInput}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            // 숫자만 입력 가능하도록 필터링
+                            if (value === '' || /^\d+$/.test(value)) {
+                              setAnalysisDaysInput(value);
+                            }
+                          }}
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              handleApplyCoinCount();
+                            }
+                          }}
+                          className="coin-count-input"
+                          disabled={loading}
+                          placeholder="7~365"
+                        />
+                        <span>일</span>
+                      </div>
                       <span className="coin-count-hint-inline">분석 일수: 7~365</span>
                     </div>
                   </div>
