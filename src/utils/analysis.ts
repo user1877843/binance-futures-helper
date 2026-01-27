@@ -552,16 +552,18 @@ export function calculateHourlyFundingRate(
 }
 
 /**
- * 이동평균선 기반 점수 계산
+ * 이동평균선 기반 점수 계산 (VWMA100 통합)
  * @param currentPrice 현재가
  * @param ma50Data MA50 데이터
  * @param ma200Data MA200 데이터
+ * @param vwma100Data VWMA100 데이터 (거래량 가중 이동평균선)
  * @returns 0-1 점수 (높을수록 Short에 유리)
  */
 function calculateMAScore(
   currentPrice: number,
   ma50Data?: Array<{ time: number; value: number }>,
-  ma200Data?: Array<{ time: number; value: number }>
+  ma200Data?: Array<{ time: number; value: number }>,
+  vwma100Data?: Array<{ time: number; value: number }>
 ): number {
   // 데이터가 없으면 중립 점수 반환
   if (!ma50Data || !ma200Data || ma50Data.length === 0 || ma200Data.length === 0) {
@@ -571,6 +573,9 @@ function calculateMAScore(
   // 최신 이동평균선 값 가져오기
   const latestMA50 = ma50Data[ma50Data.length - 1]?.value;
   const latestMA200 = ma200Data[ma200Data.length - 1]?.value;
+  const latestVWMA100 = vwma100Data && vwma100Data.length > 0 
+    ? vwma100Data[vwma100Data.length - 1]?.value 
+    : null;
 
   if (!latestMA50 || !latestMA200 || isNaN(latestMA50) || isNaN(latestMA200)) {
     return 0.5;
@@ -628,6 +633,52 @@ function calculateMAScore(
     score -= 0.1;
   }
 
+  // 3. VWMA100 분석 (거래량 가중 이동평균선)
+  if (latestVWMA100 !== null && !isNaN(latestVWMA100) && isFinite(latestVWMA100)) {
+    // 3-1. 현재가와 VWMA100의 관계
+    // VWMA100은 거래량이 큰 구간의 가격대를 나타냄
+    if (currentPrice > latestVWMA100) {
+      // 현재가가 거래량 큰 구간보다 높음 → 과매수 가능성 (Short에 유리)
+      const vwmaDiff = ((currentPrice - latestVWMA100) / latestVWMA100) * 100;
+      if (vwmaDiff > 5) {
+        score += 0.1; // 강한 과매수 (거래량 기준)
+      } else if (vwmaDiff > 2) {
+        score += 0.07; // 중간 과매수
+      } else {
+        score += 0.03; // 약한 과매수
+      }
+    } else if (currentPrice < latestVWMA100) {
+      // 현재가가 거래량 큰 구간보다 낮음 → 하락 가능성 (Short에 유리)
+      const vwmaDiff = ((latestVWMA100 - currentPrice) / latestVWMA100) * 100;
+      if (vwmaDiff > 5) {
+        score += 0.08; // 강한 하락 (거래량 기준)
+      } else if (vwmaDiff > 2) {
+        score += 0.05; // 중간 하락
+      } else {
+        score += 0.02; // 약한 하락
+      }
+    }
+
+    // 3-2. VWMA100과 일반 MA 비교 (거래량 가중 관점에서 추세 확인)
+    // VWMA100 < MA50: 거래량 가중 기준으로도 하락 추세 확인
+    if (latestVWMA100 < latestMA50 && latestMA50 < latestMA200) {
+      // 거래량 가중 기준으로도 하락 추세가 확인됨 → 신뢰도 증가
+      score += 0.05;
+    } else if (latestVWMA100 > latestMA50 && latestMA50 > latestMA200) {
+      // 거래량 가중 기준으로도 상승 추세가 확인됨 → Short에 불리
+      score -= 0.05;
+    }
+
+    // 3-3. VWMA100과 MA200 비교 (장기 추세 확인)
+    if (latestVWMA100 < latestMA200) {
+      // 거래량 가중 기준으로도 장기 하락 추세 → 추가 점수
+      score += 0.03;
+    } else if (latestVWMA100 > latestMA200) {
+      // 거래량 가중 기준으로도 장기 상승 추세 → 감점
+      score -= 0.03;
+    }
+  }
+
   // 점수를 0-1 범위로 제한
   return Math.max(0, Math.min(1, score));
 }
@@ -645,6 +696,7 @@ export function calculateShortScore(
   atr?: number,
   ma50Data?: Array<{ time: number; value: number }>,
   ma200Data?: Array<{ time: number; value: number }>,
+  vwma100Data?: Array<{ time: number; value: number }>,
   vpvrPOC?: VPVRPOC | null
 ): number {
   // 펀딩비 점수 (0-1, 높을수록 좋음)
@@ -665,9 +717,7 @@ export function calculateShortScore(
   // 기준 조정: 30-70 → 25-75 (더 강한 신호만)
   const rsiScore = Math.min(Math.max((rsi - 25) / 50, 0), 1);
   
-  // 거래량 점수 (0-1, 높을수록 좋음)
-  const quoteVolume = parseFloat(ticker.quoteVolume || '0');
-  const volumeScore = Math.min(quoteVolume / 10_000_000_000, 1.0);
+  // 거래량 점수 제거됨 - VWMA100이 거래량 정보를 이미 포함하므로 중복 제거
   
   // ADX 트렌드 점수 (0-1, 하락 트렌드이고 강할수록 높음)
   let adxScore = 0.5;
@@ -687,25 +737,25 @@ export function calculateShortScore(
     }
   }
   
-  // 이동평균선 점수 (0-1, 하락 추세일수록 높음)
+  // 이동평균선 점수 (0-1, 하락 추세일수록 높음) - VWMA100 통합
   const currentPrice = klines.length > 0 ? parseFloat(klines[klines.length - 1][4]) : parseFloat(ticker.lastPrice);
-  const maScore = calculateMAScore(currentPrice, ma50Data, ma200Data);
+  const maScore = calculateMAScore(currentPrice, ma50Data, ma200Data, vwma100Data);
   
   // VPVR POC 점수 (0-1, 현재가가 POC보다 낮을수록 높음)
   // ATR을 전달하여 동적 임계값과 신뢰도 조정 적용
   const vpvrScore = calculateVPVRScore(currentPrice, vpvrPOC, atr);
   
-  // 가중 평균 계산 (ATR 점수 제거, 비중 재조정)
-  // VPVR POC: 11%, ADX 트렌드: 15%, RSI: 15%, 펀딩비: 14%, 이동평균선: 15%, 거래량: 5%
-  // 나머지 25%는 타이밍 점수로 사용
+  // 가중 평균 계산 (최종 추천 비중 적용)
+  // 거래량 점수는 VWMA100이 거래량 정보를 이미 포함하므로 제거됨
+  // 펀딩비: 20%, ADX 트렌드: 18%, 이동평균선: 18%, RSI: 14%, VPVR POC: 10%
+  // 나머지 20%는 타이밍 점수로 사용
   // ATR은 손절선 계산에만 사용 (점수 계산에서는 제외)
   const totalScore = (
-    vpvrScore * 0.11 +
-    adxScore * 0.15 +
-    rsiScore * 0.15 +
-    fundingScore * 0.14 +
-    maScore * 0.15 +
-    volumeScore * 0.05
+    vpvrScore * 0.10 +
+    adxScore * 0.18 +
+    rsiScore * 0.14 +
+    fundingScore * 0.20 +
+    maScore * 0.18
   );
   
   return totalScore * 100;

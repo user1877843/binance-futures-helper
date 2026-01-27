@@ -236,7 +236,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
           // VPVR POC 계산 (화면에 보이는 범위의 거래량 프로파일)
           const vpvrPOC = calculateVPVRPOC(klines, 50);
 
-          // Short 점수 계산 (ADX, ATR, 이동평균선, VPVR POC 추가)
+          // Short 점수 계산 (ADX, ATR, 이동평균선, VWMA100, VPVR POC 추가)
           const shortScore = calculateShortScore(
             ticker.symbol,
             ticker,
@@ -247,6 +247,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
             atr,
             ma50Data,
             ma200Data,
+            vwma100Data,
             vpvrPOC
           );
 
@@ -388,11 +389,11 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
           });
         }
 
-        // 점수에 요일별·요일+시간대별 타이밍 반영 (비중 25%)
+        // 점수에 요일별·요일+시간대별 타이밍 반영 (비중 20%)
         const timingScore = computeTimingScore(marketWeeklyPatternLocal, marketDayHourPatternLocal);
         for (const c of scores) {
-          const base = c.short_score; // base는 이미 0~75 범위
-          c.short_score = Math.min(100, base + 0.25 * (timingScore * 100));
+          const base = c.short_score; // base는 이미 0~80 범위
+          c.short_score = Math.min(100, base + 0.20 * (timingScore * 100));
         }
         scores.sort((a, b) => b.short_score - a.short_score);
       } catch (err) {
@@ -457,7 +458,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
       // VPVR POC 계산 (화면에 보이는 범위의 거래량 프로파일)
       const vpvrPOC = calculateVPVRPOC(klines, 50);
 
-      // Short 점수 계산 (ADX, ATR, 이동평균선, VPVR POC 추가)
+      // Short 점수 계산 (ADX, ATR, 이동평균선, VWMA100, VPVR POC 추가)
       const shortScore = calculateShortScore(
         symbol,
         ticker,
@@ -468,6 +469,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
         atr,
         ma50Data,
         ma200Data,
+        vwma100Data,
         vpvrPOC
       );
 
@@ -1021,15 +1023,13 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
       <div className="score-info">
         <h3>점수 계산 기준:</h3>
         <ul>
-          <li>요일·시간대 타이밍: 25% (현재 요일·시간대가 Short에 유리할수록 가산)</li>
-          <li>ADX 트렌드: 15% (하락 트렌드이고 강할수록 유리, 횡보장 필터링)</li>
-          <li>RSI: 15% (높을수록 과매수, Short에 유리, period 9 최적화)</li>
-          <li>이동평균선: 15% (MA50 &lt; MA200일수록 하락 추세, 현재가와의 관계 고려)</li>
-          <li>펀딩비: 14% (시간당 펀딩비 기준, 높을수록 Short에 유리)</li>
-          <li>VPVR POC: 11% (현재가가 POC보다 낮을수록 Short에 유리)</li>
-          <li>거래량: 5% (높을수록 유동성 좋음)</li>
+          <li>요일·시간대 타이밍: 20% (현재 요일·시간대가 Short에 유리할수록 가산)</li>
+          <li>펀딩비: 20% (시간당 펀딩비 기준, 높을수록 Short에 유리)</li>
+          <li>ADX 트렌드: 18% (하락 트렌드이고 강할수록 유리, 횡보장 필터링)</li>
+          <li>이동평균선: 18% (MA50, MA200, VWMA100 통합 - 거래량 가중 이동평균선 포함)</li>
+          <li>RSI: 14% (높을수록 과매수, Short에 유리, period 9 최적화)</li>
+          <li>VPVR POC: 10% (현재가가 POC보다 낮을수록 Short에 유리)</li>
         </ul>
-        <p className="score-note">※ 가격 변동률은 ADX 트렌드와 중복되어 제거되었습니다. 요일별·요일+시간대별 패턴으로 타이밍 점수를 반영합니다. ATR은 손절선 계산에만 사용되며 점수 계산에서는 제외됩니다. (총합: 100%)</p>
       </div>
 
       {marketWeeklyPattern && (
