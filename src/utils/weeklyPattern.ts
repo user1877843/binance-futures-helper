@@ -29,7 +29,8 @@ export interface DayPattern {
 }
 
 /**
- * 일봉 데이터에서 요일별 패턴 분석 (한국시간 기준)
+ * 일봉 데이터에서 요일별 패턴 분석 (9:00 기준)
+ * 한국시간 9:00 시작 가격을 기준으로 각 요일별 평균 변화량 계산
  */
 export function analyzeWeeklyPattern(klines: Kline[]): WeeklyPattern | null {
   if (!klines || klines.length < 7) {

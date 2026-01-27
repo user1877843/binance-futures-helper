@@ -1036,7 +1036,7 @@ export function ShortAnalysis({ maxCoins: initialMaxCoins = 10 }: ShortAnalysisP
 
       {marketWeeklyPattern && (
         <div className="weekly-pattern-section">
-          <h3>요일별 알트코인 변화량 패턴 (한국시간 기준, 최근 {analysisDays}일 분석)</h3>
+          <h3>요일별 알트코인 변화량 패턴 (한국시간 9:00 기준, 최근 {analysisDays}일 분석)</h3>
           <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
             ※ 거래량 TOP10 코인(BTC, ETH, BNB, XRP 등)은 제외하고 계산됩니다.
           </p>
