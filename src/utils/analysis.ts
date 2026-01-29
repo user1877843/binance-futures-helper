@@ -1068,3 +1068,125 @@ export function calculateVPVRPOC(klines: Kline[], bins: number = 50): VPVRPOC | 
     total_volume: totalVolume,
   };
 }
+
+/**
+ * 이동평균선 기반 점수 계산 (Long용, VWMA100 통합)
+ * @param currentPrice 현재가
+ * @param ma50Data MA50 데이터
+ * @param ma200Data MA200 데이터
+ * @param vwma100Data VWMA100 데이터 (거래량 가중 이동평균선)
+ * @returns 0-1 점수 (높을수록 Long에 유리)
+ */
+function calculateMALongScore(
+  currentPrice: number,
+  ma50Data?: Array<{ time: number; value: number }>,
+  ma200Data?: Array<{ time: number; value: number }>,
+  vwma100Data?: Array<{ time: number; value: number }>
+): number {
+  // Short 점수를 계산한 후 반전 (1 - score)
+  const shortScore = calculateMAScore(currentPrice, ma50Data, ma200Data, vwma100Data);
+  return 1 - shortScore;
+}
+
+/**
+ * VPVR POC 기반 점수 계산 (Long용, 0-1, 높을수록 Long에 유리)
+ * 현재가가 POC보다 높을수록 Long에 유리
+ */
+export function calculateVPVRLongScore(
+  currentPrice: number,
+  vpvrPOC: VPVRPOC | null | undefined,
+  atr?: number
+): number {
+  // Short 점수를 계산한 후 반전 (1 - score)
+  const shortScore = calculateVPVRScore(currentPrice, vpvrPOC, atr);
+  return 1 - shortScore;
+}
+
+/**
+ * 요일별 + 요일+시간대별 패턴으로 타이밍 점수 계산 (Long용, 0~1)
+ * 한국시간 기준. 높을수록 Long 유리.
+ */
+export function computeLongTimingScore(
+  weeklyPattern: WeeklyPattern | null,
+  dayHourPattern: DayHourPattern | null,
+  kstNow?: Date
+): number {
+  // Short 타이밍 점수를 계산한 후 반전 (1 - score)
+  const shortTimingScore = computeTimingScore(weeklyPattern, dayHourPattern, kstNow);
+  return 1 - shortTimingScore;
+}
+
+/**
+ * Long 적합도 종합 점수 계산
+ */
+export function calculateLongScore(
+  symbol: string,
+  ticker: Ticker,
+  fundingDict: Record<string, FundingInfo>,
+  klines: Kline[],
+  rsi: number,
+  adxResult?: ADXResult,
+  atr?: number,
+  ma50Data?: Array<{ time: number; value: number }>,
+  ma200Data?: Array<{ time: number; value: number }>,
+  vwma100Data?: Array<{ time: number; value: number }>,
+  vpvrPOC?: VPVRPOC | null
+): number {
+  // 펀딩비 점수 (0-1, 높을수록 좋음)
+  // Long의 경우 펀딩비가 낮을수록(음수일수록) 유리
+  const fundingInfo = fundingDict[symbol] || { lastFundingRate: 0, nextFundingTime: 0 };
+  const hourlyFundingRate = calculateHourlyFundingRate(
+    fundingInfo.lastFundingRate,
+    fundingInfo.nextFundingTime,
+    fundingInfo.fundingIntervalHours
+  );
+  const hourlyFundingRatePercent = hourlyFundingRate * 100;
+  // 시간당 펀딩비가 -0.15% 이상이면 최저점 (0.0), +0.15% 이상이면 최고점 (1.0)
+  // Short와 반대로 계산
+  const fundingScore = Math.min(Math.max((hourlyFundingRatePercent + 0.15) / 0.3, 0), 1);
+  // 반전: 1 - fundingScore (펀딩비가 낮을수록 Long에 유리)
+  const longFundingScore = 1 - fundingScore;
+  
+  // RSI 점수 (0-1, 낮을수록 과매도, Long에 유리)
+  // RSI가 낮을수록 Long에 유리하므로 반전
+  const rsiScore = Math.min(Math.max((rsi - 25) / 50, 0), 1);
+  const longRsiScore = 1 - rsiScore;
+  
+  // ADX 트렌드 점수 (0-1, 상승 트렌드이고 강할수록 높음)
+  let adxScore = 0.5;
+  if (adxResult) {
+    if (adxResult.trend_direction === 'up' && adxResult.trend_strength === 'strong') {
+      adxScore = 0.9; // 강한 상승 트렌드
+    } else if (adxResult.trend_direction === 'up' && adxResult.trend_strength === 'moderate') {
+      adxScore = 0.7; // 중간 상승 트렌드
+    } else if (adxResult.trend_direction === 'up') {
+      adxScore = 0.6; // 약한 상승 트렌드
+    } else if (adxResult.trend_direction === 'down' && adxResult.trend_strength === 'strong') {
+      adxScore = 0.1; // 강한 하락 트렌드 (Long에 불리)
+    } else if (adxResult.trend_direction === 'down') {
+      adxScore = 0.3; // 하락 트렌드 (Long에 불리)
+    } else if (adxResult.trend_strength === 'weak') {
+      adxScore = 0.4; // 횡보장 (Long에 불리)
+    }
+  }
+  
+  // 이동평균선 점수 (0-1, 상승 추세일수록 높음) - VWMA100 통합
+  const currentPrice = klines.length > 0 ? parseFloat(klines[klines.length - 1][4]) : parseFloat(ticker.lastPrice);
+  const maScore = calculateMALongScore(currentPrice, ma50Data, ma200Data, vwma100Data);
+  
+  // VPVR POC 점수 (0-1, 현재가가 POC보다 높을수록 높음)
+  const vpvrScore = calculateVPVRLongScore(currentPrice, vpvrPOC, atr);
+  
+  // 가중 평균 계산 (최종 추천 비중 적용)
+  // 펀딩비: 20%, ADX 트렌드: 18%, 이동평균선: 18%, RSI: 14%, VPVR POC: 10%
+  // 나머지 20%는 타이밍 점수로 사용
+  const totalScore = (
+    vpvrScore * 0.10 +
+    adxScore * 0.18 +
+    longRsiScore * 0.14 +
+    longFundingScore * 0.20 +
+    maScore * 0.18
+  );
+  
+  return totalScore * 100;
+}

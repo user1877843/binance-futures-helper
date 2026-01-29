@@ -73,6 +73,7 @@ export interface CoinScore {
   symbol: string;
   ticker: Ticker;
   short_score: number;
+  long_score?: number; // Long 적합도 점수 (선택적)
   rsi: number;
   funding_rate: number;
   hourly_funding_rate: number; // 시간당 펀딩비 (%)

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { TopGainers } from './components/TopGainers';
 import { ShortAnalysis } from './components/ShortAnalysis';
+import { LongAnalysis } from './components/LongAnalysis';
 import './App.css';
 
-type Mode = 'gainers' | 'short' | 'calendar';
+type Mode = 'gainers' | 'short' | 'long' | 'calendar';
 
 const STORAGE_KEY = 'binance-futures-max-coins';
 const DEFAULT_MAX_COINS = 10;
@@ -36,6 +37,12 @@ function App() {
               Short 적합도 분석
             </button>
             <button
+              className={`nav-button ${mode === 'long' ? 'active' : ''}`}
+              onClick={() => setMode('long')}
+            >
+              Long 적합도 분석
+            </button>
+            <button
               className={`nav-button ${mode === 'calendar' ? 'active' : ''}`}
               onClick={() => setMode('calendar')}
             >
@@ -48,6 +55,7 @@ function App() {
       <main className="main-content">
         {mode === 'gainers' && <TopGainers maxCoins={maxCoins} />}
         {mode === 'short' && <ShortAnalysis maxCoins={maxCoins} />}
+        {mode === 'long' && <LongAnalysis maxCoins={maxCoins} />}
         {mode === 'calendar' && (
           <div style={{ width: '100%', height: '100vh', border: 'none' }}>
             <iframe
